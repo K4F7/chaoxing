@@ -1,0 +1,7 @@
+.dev.vars
+.auth/
+.wrangler/
+node_modules/
+dist/
+*.log
+google-oauth-client.json

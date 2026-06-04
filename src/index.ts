@@ -1,4 +1,5 @@
 import { checkChaoxingAuth } from "./auth";
+import { buildAppSyncResponse } from "./app-sync";
 import { handleCalDav } from "./caldav";
 import { syncGoogleCalendar } from "./google-calendar";
 import { processAssignments } from "./processor";
@@ -78,6 +79,7 @@ export default {
     if (
       url.pathname === "/process" ||
       url.pathname === "/sync" ||
+      url.pathname === "/app/sync" ||
       url.pathname === "/google/calendar/sync" ||
       url.pathname === "/calendar.ics" ||
       url.pathname === "/todos.ics"
@@ -104,6 +106,12 @@ export default {
             ...result,
             syncItems: buildSyncItems(result.requirements),
           });
+        }
+
+        if (url.pathname === "/app/sync") {
+          return jsonResponse(
+            buildAppSyncResponse(result, buildSyncItems(result.requirements)),
+          );
         }
 
         if (url.pathname === "/google/calendar/sync") {
@@ -201,6 +209,7 @@ function isKnownPath(pathname: string): boolean {
     "/auth/check",
     "/process",
     "/sync",
+    "/app/sync",
     "/google/calendar/sync",
     "/calendar.ics",
     "/todos.ics",
@@ -222,6 +231,7 @@ function allowedMethods(pathname: string): string {
   if (
     pathname === "/process" ||
     pathname === "/sync" ||
+    pathname === "/app/sync" ||
     pathname === "/google/calendar/sync" ||
     pathname === "/calendar.ics" ||
     pathname === "/todos.ics"

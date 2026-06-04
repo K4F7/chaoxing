@@ -5,3 +5,26 @@ node_modules/
 dist/
 *.log
 google-oauth-client.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Reports and local secrets
+reports/
+.env
+.env.*
+!.env.example
+key.properties
+*.keystore
+*.jks

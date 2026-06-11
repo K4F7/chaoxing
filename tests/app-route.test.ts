@@ -105,7 +105,7 @@ async function mockChaoxingFetch(
       `<title>作业作答</title>
       <input id="workId" value="1" />
       作答时间:<em>2026-06-01 08:00:00</em>至<em>2026-06-05 23:59:00</em>`,
-      { status: init?.redirect === "follow" ? 200 : 302 },
+      { status: 200 },
     );
   }
 

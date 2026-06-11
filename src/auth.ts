@@ -1,12 +1,15 @@
+import {
+  CookieRequestSecurityError,
+  fetchChaoxingWithCookie,
+  type CookieFetcher,
+} from "./safe-fetch";
+
 export const DEFAULT_CHAOXING_HOME_URL =
   "https://i.chaoxing.com/base?ws=1&t=1780231212848";
 
 const MAX_AUTH_BODY_BYTES = 512 * 1024;
 
-export type AuthFetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+export type AuthFetcher = CookieFetcher;
 
 export type LoginSignals = {
   hasPassportLoginUrl: boolean;
@@ -62,20 +65,38 @@ export async function checkChaoxingAuth(
   }
 
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher(targetUrl, {
-    method: "GET",
-    redirect: "follow",
-    headers: {
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
-      "Cache-Control": "no-cache",
-      Cookie: options.cookie,
-      Pragma: "no-cache",
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetchChaoxingWithCookie(fetcher, targetUrl, {
+      method: "GET",
+      headers: {
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+        "Cache-Control": "no-cache",
+        Cookie: options.cookie,
+        Pragma: "no-cache",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof CookieRequestSecurityError)) {
+      throw error;
+    }
+
+    return {
+      authenticated: false,
+      checkedAt,
+      targetUrl,
+      finalUrl: targetUrl,
+      status: 0,
+      redirected: false,
+      title: null,
+      features: emptyFeatures,
+      failureReason: error.message,
+    };
+  }
 
   const finalUrl = response.url || targetUrl;
   const { text, truncated } = await readTextWithLimit(

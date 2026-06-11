@@ -48,6 +48,27 @@ describe("assignment processor", () => {
     ]);
   });
 
+  test("rejects non-chaoxing work links before cookie-bearing fetch", () => {
+    const summary = {
+      title: "作业",
+      sendTime: null,
+      detailStatus: 200,
+      apiStatus: true,
+      detailTitle: "作业",
+      sourceType: null,
+      content: null,
+      assignmentLinks: [
+        "https://evil.example/work?workOrExam=work",
+        "https://mooc1.chaoxing.com/work?workOrExam=work&workId=1",
+      ],
+      decodedAttachments: [],
+    } satisfies DetailSummary;
+
+    expect([...collectUniqueWorkLinks([summary]).keys()]).toEqual([
+      "https://mooc1.chaoxing.com/work?workOrExam=work&workId=1",
+    ]);
+  });
+
   test("fetches detail summary with decoded attachment links", async () => {
     const attachment = encodeURIComponent(
       btoa(
@@ -138,7 +159,7 @@ describe("assignment processor", () => {
       if (url.startsWith("https://mooc1.chaoxing.com/work")) {
         return new Response(
           `<title>作业作答</title><input id="workId" value="1" />`,
-          { status: init?.redirect === "follow" ? 200 : 302 },
+          { status: 200 },
         );
       }
 
@@ -164,5 +185,83 @@ describe("assignment processor", () => {
     expect(result.failedRequirements).toEqual([]);
     expect(result.requirements[0].workId).toBe("1");
     expect(calls).toContain("https://notice.chaoxing.com/pc/notice/getNoticeList");
+  });
+
+  test("does not send cookies to malicious assignment links from notices", async () => {
+    const calls: Array<{ url: string; cookie: string | null }> = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({
+        url,
+        cookie: new Headers(init?.headers).get("Cookie"),
+      });
+
+      if (url.startsWith("https://i.chaoxing.com/base")) {
+        return new Response(
+          `https://notice.chaoxing.com/pc/notice/myNotice?s=abc123`,
+          { headers: { "Content-Type": "text/html" } },
+        );
+      }
+
+      if (url.startsWith("https://notice.chaoxing.com/pc/notice/myNotice")) {
+        return new Response("window.nowYear='2026';", {
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+
+      if (url.endsWith("/pc/notice/getNoticeList")) {
+        return Response.json({
+          status: true,
+          notices: {
+            list: [
+              {
+                id: "notice-1",
+                title: "作业通知",
+                sendTime: "2026-06-01 08:00:00",
+                isread: 0,
+                content: "请完成作业",
+                sendTag: 0,
+              },
+            ],
+            lastPage: true,
+          },
+        });
+      }
+
+      if (url.includes("/getNoticeDetail")) {
+        return Response.json({
+          status: true,
+          msg: {
+            title: "作业通知",
+            rtf_content: "https://evil.example/work?workOrExam=work",
+          },
+        });
+      }
+
+      if (url.startsWith("https://evil.example")) {
+        return new Response("leaked", { status: 200 });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    const result = await processAssignments({
+      cookie: "UID=secret",
+      fetcher: fetcher as unknown as typeof fetch,
+      inboxLimit: 5,
+      detailsLimit: 5,
+      requirementsLimit: 5,
+    });
+
+    expect(result.totalUniqueWorkLinks).toBe(0);
+    expect(result.fetchedRequirements).toBe(0);
+    expect(calls.some((call) => call.url.startsWith("https://evil.example"))).toBe(false);
+    expect(
+      calls.some(
+        (call) =>
+          call.url.startsWith("https://evil.example") &&
+          call.cookie === "UID=secret",
+      ),
+    ).toBe(false);
   });
 });

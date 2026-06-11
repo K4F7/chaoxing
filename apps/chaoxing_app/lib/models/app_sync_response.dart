@@ -37,6 +37,23 @@ class AppSyncResponse {
     );
   }
 
+  factory AppSyncResponse.build({
+    required DateTime now,
+    required DateTime lastSyncedAt,
+    required List<SyncItem> items,
+    required List<AppSyncFailure> failures,
+    String authStatus = 'ok',
+  }) {
+    final enriched = items.map((item) => _buildAppSyncItem(item, now)).toList()
+      ..sort(_compareAppSyncItems);
+    return AppSyncResponse(
+      lastSyncedAt: lastSyncedAt,
+      authStatus: authStatus,
+      items: enriched,
+      failures: failures,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'lastSyncedAt': lastSyncedAt?.toIso8601String(),
@@ -45,6 +62,50 @@ class AppSyncResponse {
       'failures': failures.map((failure) => failure.toJson()).toList(),
     };
   }
+}
+
+SyncItem _buildAppSyncItem(SyncItem item, DateTime now) {
+  final dueAt = item.dueAt;
+  final dueInHours = dueAt == null
+      ? null
+      : ((dueAt.millisecondsSinceEpoch - now.millisecondsSinceEpoch) /
+                Duration.millisecondsPerHour)
+            .round();
+
+  return item.copyWith(
+    displayStatus: dueAt == null
+        ? SyncDisplayStatus.unscheduled
+        : _classifyDueDate(dueAt, now),
+    dueInHours: dueInHours,
+  );
+}
+
+int _compareAppSyncItems(SyncItem left, SyncItem right) {
+  if (left.dueAt == null && right.dueAt == null) {
+    return left.title.compareTo(right.title);
+  }
+  if (left.dueAt == null) {
+    return 1;
+  }
+  if (right.dueAt == null) {
+    return -1;
+  }
+  return left.dueAt!.compareTo(right.dueAt!);
+}
+
+SyncDisplayStatus _classifyDueDate(DateTime dueAt, DateTime now) {
+  if (dueAt.isBefore(now)) {
+    return SyncDisplayStatus.overdue;
+  }
+
+  return _localDateKey(dueAt) == _localDateKey(now)
+      ? SyncDisplayStatus.today
+      : SyncDisplayStatus.upcoming;
+}
+
+String _localDateKey(DateTime value) {
+  final local = value.toLocal();
+  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }
 
 class AppSyncFailure {

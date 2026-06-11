@@ -357,17 +357,17 @@ class _EmptySetup extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.cloud_sync, size: 44),
+                  const Icon(Icons.cookie, size: 44),
                   const SizedBox(height: 12),
                   Text(
-                    '连接你的 Worker',
+                    '配置学习通 Cookie',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    '填写 Worker URL 和 RUN_TOKEN 后即可同步学习通作业考试。',
+                    '填入当前浏览器登录态 Cookie 后，本地抓取即将到来的作业和考试。',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),

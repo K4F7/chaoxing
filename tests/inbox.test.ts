@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   extractInboxPageConfig,
+  fetchInboxMessages,
   findInboxUrl,
   normalizeNotice,
 } from "../src/inbox";
@@ -59,5 +60,35 @@ window.fidsCode = '';
         "https://notice.chaoxing.com/pc/notice/$CACG$uuid/detail?sendTag=0",
       sendTag: 0,
     });
+  });
+
+  test("does not follow non-chaoxing redirects with cookies", async () => {
+    const calls: Array<{ url: string; cookie: string | null }> = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({
+        url,
+        cookie: new Headers(init?.headers).get("Cookie"),
+      });
+
+      return new Response("", {
+        status: 302,
+        headers: { Location: "https://evil.example/pc/notice/myNotice" },
+      });
+    };
+
+    await expect(
+      fetchInboxMessages({
+        cookie: "UID=secret",
+        fetcher: fetcher as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow("untrusted_redirect_target");
+
+    expect(calls).toEqual([
+      {
+        url: "https://i.chaoxing.com/base?ws=1&t=1780231212848",
+        cookie: "UID=secret",
+      },
+    ]);
   });
 });

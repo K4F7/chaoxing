@@ -46,6 +46,42 @@ class SyncItem {
       dueAt!.isAfter(DateTime.now()) &&
       dueAt!.difference(DateTime.now()).inHours <= 72;
 
+  SyncItem copyWith({
+    String? id,
+    SyncItemKind? kind,
+    String? title,
+    String? url,
+    String? sourceTitle,
+    String? sourceSendTime,
+    DateTime? startAt,
+    DateTime? dueAt,
+    String? status,
+    SyncDisplayStatus? displayStatus,
+    int? dueInHours,
+    String? courseId,
+    String? classId,
+    String? workId,
+    String? answerId,
+  }) {
+    return SyncItem(
+      id: id ?? this.id,
+      kind: kind ?? this.kind,
+      title: title ?? this.title,
+      url: url ?? this.url,
+      sourceTitle: sourceTitle ?? this.sourceTitle,
+      sourceSendTime: sourceSendTime ?? this.sourceSendTime,
+      startAt: startAt ?? this.startAt,
+      dueAt: dueAt ?? this.dueAt,
+      status: status ?? this.status,
+      displayStatus: displayStatus ?? this.displayStatus,
+      dueInHours: dueInHours ?? this.dueInHours,
+      courseId: courseId ?? this.courseId,
+      classId: classId ?? this.classId,
+      workId: workId ?? this.workId,
+      answerId: answerId ?? this.answerId,
+    );
+  }
+
   factory SyncItem.fromJson(Map<String, dynamic> json) {
     return SyncItem(
       id: json.readString('id'),

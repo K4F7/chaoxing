@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_config.dart';
 import '../models/app_sync_response.dart';
+import 'reminder_service.dart';
 
 abstract class AppStorage {
   Future<AppConfig> loadConfig();
@@ -14,38 +15,61 @@ abstract class AppStorage {
   Future<AppSyncResponse?> loadCachedSync();
 
   Future<void> saveCachedSync(AppSyncResponse response);
+
+  Future<ReminderHistory> loadReminderHistory();
+
+  Future<void> saveReminderHistory(ReminderHistory history);
 }
 
 class DeviceAppStorage implements AppStorage {
-  DeviceAppStorage({FlutterSecureStorage? secureStorage})
-    : _secureStorage = secureStorage ?? const FlutterSecureStorage();
+  DeviceAppStorage({
+    FlutterSecureStorage? secureStorage,
+    DateTime Function()? clock,
+  }) : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+       _clock = clock ?? DateTime.now;
 
-  static const _baseUrlKey = 'worker_base_url';
-  static const _tokenKey = 'run_token';
+  static const _cookieKey = 'chaoxing_cookie';
+  static const _legacyBaseUrlKey = 'worker_base_url';
+  static const _legacyTokenKey = 'run_token';
+  static const _inboxPageLimitKey = 'inbox_page_limit';
+  static const _inboxItemLimitKey = 'inbox_item_limit';
   static const _refreshMinutesKey = 'refresh_minutes';
+  static const _remindersEnabledKey = 'reminders_enabled';
   static const _cachedSyncKey = 'cached_app_sync';
+  static const _reminderHistoryKey = 'reminder_history';
 
   final FlutterSecureStorage _secureStorage;
+  final DateTime Function() _clock;
   SharedPreferencesWithCache? _preferences;
 
   @override
   Future<AppConfig> loadConfig() async {
     final prefs = await _prefs();
-    final baseUrl = await _secureStorage.read(key: _baseUrlKey) ?? '';
-    final token = await _secureStorage.read(key: _tokenKey) ?? '';
+    final cookie = await _secureStorage.read(key: _cookieKey) ?? '';
+    final legacyBaseUrl =
+        await _secureStorage.read(key: _legacyBaseUrlKey) ?? '';
+    final legacyToken = await _secureStorage.read(key: _legacyTokenKey) ?? '';
     return AppConfig(
-      baseUrl: baseUrl,
-      token: token,
+      cookie: cookie,
+      inboxPageLimit: prefs.getInt(_inboxPageLimitKey) ?? 3,
+      inboxItemLimit: prefs.getInt(_inboxItemLimitKey) ?? 60,
       refreshMinutes: prefs.getInt(_refreshMinutesKey) ?? 60,
+      remindersEnabled: prefs.getBool(_remindersEnabledKey) ?? true,
+      legacyWorkerConfigDetected:
+          legacyBaseUrl.trim().isNotEmpty || legacyToken.trim().isNotEmpty,
     );
   }
 
   @override
   Future<void> saveConfig(AppConfig config) async {
     final prefs = await _prefs();
-    await _secureStorage.write(key: _baseUrlKey, value: config.baseUrl.trim());
-    await _secureStorage.write(key: _tokenKey, value: config.token.trim());
+    await _secureStorage.write(key: _cookieKey, value: config.cookie.trim());
+    await _secureStorage.delete(key: _legacyBaseUrlKey);
+    await _secureStorage.delete(key: _legacyTokenKey);
+    await prefs.setInt(_inboxPageLimitKey, config.inboxPageLimit);
+    await prefs.setInt(_inboxItemLimitKey, config.inboxItemLimit);
     await prefs.setInt(_refreshMinutesKey, config.refreshMinutes);
+    await prefs.setBool(_remindersEnabledKey, config.remindersEnabled);
   }
 
   @override
@@ -55,17 +79,57 @@ class DeviceAppStorage implements AppStorage {
     if (raw == null || raw.isEmpty) {
       return null;
     }
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map<String, dynamic>) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        await prefs.remove(_cachedSyncKey);
+        return null;
+      }
+      final cached = AppSyncResponse.fromJson(decoded);
+      final now = _clock();
+      return AppSyncResponse.build(
+        now: now,
+        lastSyncedAt: cached.lastSyncedAt ?? now,
+        authStatus: cached.authStatus,
+        items: cached.items,
+        failures: cached.failures,
+      );
+    } catch (_) {
+      await prefs.remove(_cachedSyncKey);
       return null;
     }
-    return AppSyncResponse.fromJson(decoded);
   }
 
   @override
   Future<void> saveCachedSync(AppSyncResponse response) async {
     final prefs = await _prefs();
     await prefs.setString(_cachedSyncKey, jsonEncode(response.toJson()));
+  }
+
+  @override
+  Future<ReminderHistory> loadReminderHistory() async {
+    final prefs = await _prefs();
+    final raw = prefs.getString(_reminderHistoryKey);
+    if (raw == null || raw.isEmpty) {
+      return const ReminderHistory.empty();
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        await prefs.remove(_reminderHistoryKey);
+        return const ReminderHistory.empty();
+      }
+      return ReminderHistory.fromJson(decoded);
+    } catch (_) {
+      await prefs.remove(_reminderHistoryKey);
+      return const ReminderHistory.empty();
+    }
+  }
+
+  @override
+  Future<void> saveReminderHistory(ReminderHistory history) async {
+    final prefs = await _prefs();
+    await prefs.setString(_reminderHistoryKey, jsonEncode(history.toJson()));
   }
 
   Future<SharedPreferencesWithCache> _prefs() async {
@@ -78,8 +142,13 @@ class DeviceAppStorage implements AppStorage {
 class MemoryAppStorage implements AppStorage {
   AppConfig config;
   AppSyncResponse? cachedSync;
+  ReminderHistory reminderHistory;
 
-  MemoryAppStorage({this.config = AppConfig.empty, this.cachedSync});
+  MemoryAppStorage({
+    this.config = AppConfig.empty,
+    this.cachedSync,
+    this.reminderHistory = const ReminderHistory.empty(),
+  });
 
   @override
   Future<AppConfig> loadConfig() async => config;
@@ -95,5 +164,13 @@ class MemoryAppStorage implements AppStorage {
   @override
   Future<void> saveCachedSync(AppSyncResponse response) async {
     cachedSync = response;
+  }
+
+  @override
+  Future<ReminderHistory> loadReminderHistory() async => reminderHistory;
+
+  @override
+  Future<void> saveReminderHistory(ReminderHistory history) async {
+    reminderHistory = history;
   }
 }

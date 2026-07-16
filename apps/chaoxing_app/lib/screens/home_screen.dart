@@ -1,12 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../models/sync_item.dart';
+import '../services/local_diagnostics.dart';
 import '../state/app_controller.dart';
 import '../widgets/month_calendar.dart';
 import '../widgets/sync_item_card.dart';
 import 'detail_screen.dart';
+import 'diagnostics_screen.dart';
 import 'settings_screen.dart';
+import 'windows_login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({required this.controller, super.key});
@@ -54,6 +60,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
+            tooltip: '诊断',
+            onPressed: () => _openDiagnostics(context),
+            icon: const Icon(Icons.monitor_heart_outlined),
+          ),
+          IconButton(
             tooltip: '设置',
             onPressed: () => _openSettings(context),
             icon: const Icon(Icons.settings),
@@ -68,8 +79,14 @@ class _HomeScreenState extends State<HomeScreen> {
               tabIndex: _tabIndex,
               onTabChanged: (value) => setState(() => _tabIndex = value),
               onItemTap: (item) => _openDetail(context, item),
+              onOpenDiagnostics: () => _openDiagnostics(context),
             )
-          : _EmptySetup(onOpenSettings: () => _openSettings(context)),
+          : _EmptySetup(
+              onOpenLogin: Platform.isWindows
+                  ? () => _openLogin(context)
+                  : null,
+              onOpenSettings: () => _openSettings(context),
+            ),
     );
   }
 
@@ -79,6 +96,25 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => SettingsScreen(
           initialConfig: widget.controller.config,
           onSave: widget.controller.saveConfig,
+          onTestNotification: Platform.isWindows
+              ? widget.controller.sendTestNotification
+              : null,
+          onOpenLogin: Platform.isWindows
+              ? () {
+                  Navigator.of(context).pop();
+                  _openLogin(context);
+                }
+              : null,
+        ),
+      ),
+    );
+  }
+
+  void _openLogin(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WindowsLoginScreen(
+          onCookieCaptured: widget.controller.importLoginCookie,
         ),
       ),
     );
@@ -89,6 +125,25 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => DetailScreen(item: item)));
   }
+
+  void _openDiagnostics(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DiagnosticsScreen(
+          sync: widget.controller.sync,
+          error: widget.controller.error,
+          onCopyDiagnostics: () async {
+            final report = buildDiagnosticsReport(
+              cookieHeader: widget.controller.config.cookie,
+              sync: widget.controller.sync,
+              lastError: widget.controller.error,
+            );
+            await Clipboard.setData(ClipboardData(text: report));
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _Dashboard extends StatelessWidget {
@@ -97,12 +152,14 @@ class _Dashboard extends StatelessWidget {
     required this.tabIndex,
     required this.onTabChanged,
     required this.onItemTap,
+    required this.onOpenDiagnostics,
   });
 
   final AppController controller;
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final ValueChanged<SyncItem> onItemTap;
+  final VoidCallback onOpenDiagnostics;
 
   @override
   Widget build(BuildContext context) {
@@ -115,6 +172,13 @@ class _Dashboard extends StatelessWidget {
           if (controller.error != null) ...[
             const SizedBox(height: 12),
             _ErrorBanner(message: controller.error!),
+          ],
+          if (controller.sync?.failures.isNotEmpty ?? false) ...[
+            const SizedBox(height: 12),
+            _PartialFailureBanner(
+              failureCount: controller.sync!.failures.length,
+              onOpenDiagnostics: onOpenDiagnostics,
+            ),
           ],
           const SizedBox(height: 14),
           SegmentedButton<int>(
@@ -183,6 +247,22 @@ class _SummaryHeader extends StatelessWidget {
                   ),
               ],
             ),
+            if (controller.refreshing) ...[
+              const SizedBox(height: 10),
+              LinearProgressIndicator(
+                value:
+                    controller.syncProgress != null &&
+                        controller.syncProgress!.total > 0
+                    ? controller.syncProgress!.completed /
+                          controller.syncProgress!.total
+                    : null,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                controller.syncProgress?.description ?? '准备同步',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -257,7 +337,7 @@ class _TodoView extends StatelessWidget {
       return const _BlankState(
         icon: Icons.inbox,
         title: '暂时没有待办',
-        body: '同步成功后，解析到截止时间的作业和考试会显示在这里。',
+        body: '同步成功后，作业和考试会显示在这里；未识别到截止时间的项目也会保留。',
       );
     }
 
@@ -276,6 +356,11 @@ class _TodoView extends StatelessWidget {
         _Section(
           title: '未来待办',
           items: controller.upcomingItems,
+          onItemTap: onItemTap,
+        ),
+        _Section(
+          title: '未识别截止时间',
+          items: controller.unscheduledItems,
           onItemTap: onItemTap,
         ),
       ],
@@ -339,10 +424,40 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
+class _PartialFailureBanner extends StatelessWidget {
+  const _PartialFailureBanner({
+    required this.failureCount,
+    required this.onOpenDiagnostics,
+  });
+
+  final int failureCount;
+  final VoidCallback onOpenDiagnostics;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Theme.of(context).colorScheme.tertiaryContainer,
+      child: ListTile(
+        leading: Icon(
+          Icons.warning_amber_rounded,
+          color: Theme.of(context).colorScheme.onTertiaryContainer,
+        ),
+        title: Text('部分数据源同步失败（$failureCount）'),
+        subtitle: const Text('已有结果仍会保留；可打开诊断查看脱敏后的失败阶段。'),
+        trailing: TextButton(
+          onPressed: onOpenDiagnostics,
+          child: const Text('查看诊断'),
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptySetup extends StatelessWidget {
-  const _EmptySetup({required this.onOpenSettings});
+  const _EmptySetup({required this.onOpenSettings, this.onOpenLogin});
 
   final VoidCallback onOpenSettings;
+  final VoidCallback? onOpenLogin;
 
   @override
   Widget build(BuildContext context) {
@@ -366,15 +481,30 @@ class _EmptySetup extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    '填入当前浏览器登录态 Cookie 后，本地抓取即将到来的作业和考试。',
+                  Text(
+                    onOpenLogin == null
+                        ? '填入当前浏览器登录态 Cookie 后，本地抓取即将到来的作业和考试。'
+                        : '在 App 内登录学习通后，将自动导入登录态并开始本地同步。',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: onOpenSettings,
-                    icon: const Icon(Icons.settings),
-                    label: const Text('打开设置'),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      if (onOpenLogin != null)
+                        FilledButton.icon(
+                          onPressed: onOpenLogin,
+                          icon: const Icon(Icons.login),
+                          label: const Text('登录学习通'),
+                        ),
+                      OutlinedButton.icon(
+                        onPressed: onOpenSettings,
+                        icon: const Icon(Icons.cookie_outlined),
+                        label: const Text('手动导入 Cookie'),
+                      ),
+                    ],
                   ),
                 ],
               ),

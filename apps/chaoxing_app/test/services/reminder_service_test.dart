@@ -22,6 +22,128 @@ void main() {
     expect(pending.single.item.id, 'assignment-1');
     expect(duplicate, isEmpty);
   });
+
+  test(
+    'windows notifier initializes and records a delivered reminder',
+    () async {
+      final backend = FakeNotificationBackend();
+      String? clickedItemId;
+      final notifier = WindowsReminderNotifier(
+        backend: backend,
+        enabled: true,
+        onNotificationClick: (itemId) => clickedItemId = itemId,
+      );
+      final candidate = ReminderCandidate(
+        key: 'assignment-1|assignment|due',
+        item: syncItem(dueAt: DateTime(2026, 6, 5, 11)),
+      );
+
+      await notifier.initialize();
+      final delivered = await notifier.show(candidate);
+      backend.lastRequest?.onClick();
+
+      expect(backend.initialized, true);
+      expect(delivered, true);
+      expect(backend.lastRequest?.title, '作业截止提醒');
+      expect(backend.lastRequest?.body, contains('2026-06-05 11:00'));
+      expect(clickedItemId, 'assignment-1');
+    },
+  );
+
+  test('windows notifier remains inactive on unsupported platforms', () async {
+    final backend = FakeNotificationBackend();
+    final notifier = WindowsReminderNotifier(backend: backend, enabled: false);
+
+    await notifier.initialize();
+    final delivered = await notifier.show(
+      ReminderCandidate(
+        key: 'assignment-1|assignment|due',
+        item: syncItem(dueAt: DateTime(2026, 6, 5, 11)),
+      ),
+    );
+
+    expect(backend.initialized, false);
+    expect(backend.lastRequest, isNull);
+    expect(delivered, false);
+  });
+
+  test('marks reminder history only after successful delivery', () async {
+    final notifier = RecordingReminderNotifier(delivered: true);
+    final service = LocalReminderService(notifier: notifier);
+    final now = DateTime(2026, 6, 5, 9);
+
+    final history = await service.process(
+      items: [syncItem(dueAt: now.add(const Duration(hours: 1)))],
+      history: const ReminderHistory.empty(),
+      now: now,
+    );
+
+    expect(notifier.candidates, hasLength(1));
+    expect(history.contains(notifier.candidates.single.key), true);
+  });
+
+  test('prunes stale, future, and excess reminder history entries', () {
+    final now = DateTime(2026, 7, 16, 12);
+    final history = ReminderHistory({
+      'stale': now.subtract(const Duration(days: 91)),
+      'future': now.add(const Duration(days: 2)),
+      'recent-a': now.subtract(const Duration(hours: 1)),
+      'recent-b': now.subtract(const Duration(hours: 2)),
+      'recent-c': now.subtract(const Duration(hours: 3)),
+    });
+
+    final pruned = history.prune(now, maximumEntries: 2);
+
+    expect(pruned.sent.keys, ['recent-a', 'recent-b']);
+    expect(pruned.sent, isNot(contains('stale')));
+    expect(pruned.sent, isNot(contains('future')));
+  });
+
+  test(
+    'sends a repeatable notification test without reminder history',
+    () async {
+      final notifier = RecordingReminderNotifier(delivered: true);
+      final service = LocalReminderService(notifier: notifier);
+
+      final delivered = await service.sendTestNotification(
+        now: DateTime(2026, 7, 16, 17, 30),
+      );
+
+      expect(delivered, isTrue);
+      expect(notifier.candidates, hasLength(1));
+      expect(notifier.candidates.single.key, 'notification-test');
+      expect(notifier.candidates.single.item.id, 'notification-test');
+      expect(notifier.candidates.single.item.title, contains('恢复主窗口'));
+    },
+  );
+}
+
+class FakeNotificationBackend implements DesktopNotificationBackend {
+  bool initialized = false;
+  DesktopNotificationRequest? lastRequest;
+
+  @override
+  Future<void> initialize() async {
+    initialized = true;
+  }
+
+  @override
+  Future<void> show(DesktopNotificationRequest request) async {
+    lastRequest = request;
+  }
+}
+
+class RecordingReminderNotifier implements ReminderNotifier {
+  RecordingReminderNotifier({required this.delivered});
+
+  final bool delivered;
+  final List<ReminderCandidate> candidates = [];
+
+  @override
+  Future<bool> show(ReminderCandidate candidate) async {
+    candidates.add(candidate);
+    return delivered;
+  }
 }
 
 SyncItem syncItem({required DateTime dueAt}) {

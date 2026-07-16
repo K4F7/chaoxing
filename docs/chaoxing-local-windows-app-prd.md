@@ -13,7 +13,7 @@
 
 Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN 客户端迁移为本地学习通 Cookie 同步；Windows 平台目录已生成；Windows release build 已通过。当前 App 已具备认证检查、收件箱定位/分页、通知关键词筛选、详情链接提取、作业/考试时间解析、`AppSyncResponse` 构建、排序、`displayStatus`、`dueInHours` 等本地同步能力。
 
-后续 Phase 2/3 聚焦把 Windows 工具形态补完整，包括真实 Windows toast、系统托盘、内置登录或 Cookie 自动导入、课程空间/考试列表补漏、Windows CI 与打包发布。安全要求贯穿所有阶段：Cookie 必须进入安全存储，带 Cookie 请求必须受学习通域名 allowlist 和重定向校验约束，错误与诊断信息必须脱敏。
+后续 Phase 2/3 聚焦完成 Windows toast/托盘、内置 WebView2 登录和课程空间补漏的真实环境验收。Windows CI、双平台打包发布、内置登录及 HttpOnly Cookie Store 导入、诊断页面、统一脱敏导出和可选课程作业/考试补充源已接入。安全要求贯穿所有阶段：Cookie 必须进入安全存储，带 Cookie 请求必须受显式主机 allowlist 和重定向校验约束，错误与诊断信息必须脱敏。
 
 ---
 
@@ -30,17 +30,22 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 ## Success Metrics
 
 **Primary KPIs:**
-- 本地同步可用率：在有效学习通 Cookie 下，App 能完成收件箱同步并返回标准化 `AppSyncResponse`；通过 fixture 单元测试和后续真实账号端到端验证衡量。
+- 本地同步可用率：在有效学习通 Cookie 下，App 能完成收件箱同步并返回标准化 `AppSyncResponse`；通过 fixture 单元测试和真实账号端到端回归衡量。
 - 提醒准确性：同一 `itemId + remindRule + dueAtSnapshot` 不重复提醒；作业和考试能按截止时间计算 `displayStatus` 和 `dueInHours`；通过提醒调度测试和 Windows 手动验证衡量。
 - 安全合规性：Cookie 不出现在 shared_preferences、UI 回填、日志、诊断导出或非学习通请求中；通过代码审核、测试和安全检查清单衡量。
-- Windows 可交付性：`flutter build windows` 成功生成 release exe；通过构建命令和产物路径验证。
+- Windows 可交付性：`flutter build windows` 成功生成 release exe；Windows CI 持续执行 analyze/test/build，并发布完整 Windows x64 压缩包。
 
 **Validation**:
 - Worker 验证：`bun run typecheck`、`bun test` 已通过，共 32 tests。
-- Flutter 验证：`flutter analyze`、`flutter test` 已通过，共 23 tests。
+- Flutter 验证：`flutter analyze`、`flutter test` 已通过，共 110 tests。
 - Windows 构建验证：`flutter build windows` 已通过。
 - Windows 构建产物：`apps/chaoxing_app/build/windows/x64/runner/Release/chaoxing_app.exe`。
-- 剩余验证：尚未使用真实学习通账号完成端到端网络同步；Windows toast 和托盘仍需实现并手动验收。
+- Windows CI：Windows runner 执行 `flutter analyze`、`flutter test`、`flutter build windows --release`，并上传 `chaoxing-app-windows-x64.zip`。
+- 发布流程：main 分支推送时使用 `github.run_number` 作为 Android versionCode 和 Windows build suffix，由单个 GitHub Release 同时发布 Android APK、Windows x64 压缩包和覆盖两者的 `SHA256SUMS`；生成校验和前显式确认两个产物存在，并列明 Cookie 安全边界、端到端验证状态和已知限制。功能分支、PR 和手动构建只上传临时 artifact。
+- Android main 发布必须从 `ANDROID_KEYSTORE_BASE64` 与 `ANDROID_KEY_PROPERTIES_BASE64` Secrets 恢复固定 release keystore，并通过 `apksigner verify`；缺失 secret 时正式发布失败。本地、功能分支与 PR 可回退 debug 签名，仅作为临时 artifact，密钥文件不得提交或上传。
+- Android `namespace`、`applicationId`、Manifest `.MainActivity` 与 Kotlin package 统一为 `com.sein.chaoxingapp`，CI 在构建前执行入口一致性检查，避免可构建但无法启动的 APK。
+- Android Manifest 必须设置 `allowBackup=false`、`usesCleartextTraffic=false`，并且不声明 HTTP VIEW query；CI 持续检查，防止普通待办缓存/提醒历史进入系统备份或明文网络能力绕过统一 HTTPS 策略。
+- 剩余验证：真实账号端到端网络同步、关闭隐藏保持后台进程和测试通知后端调用已通过；Windows 通知肉眼可见性、通知点击和托盘菜单/退出仍需手动验收。
 
 ---
 
@@ -76,7 +81,7 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - [x] 同步结果构建为 `AppSyncResponse`，包含 items、failures、authStatus、lastSyncedAt。
 - [x] items 按截止时间排序，并计算 `displayStatus` 和 `dueInHours`。
 - [x] 设置页不明文回填 Cookie。
-- [ ] 使用真实学习通账号完成端到端网络同步验收。
+- [x] 使用真实学习通账号完成端到端网络同步验收。
 
 ### Story 2: Windows 桌面工具展示和刷新
 
@@ -100,12 +105,13 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 **So that** 我的账号凭据不会被泄漏到第三方域名、日志或诊断文件
 
 **Acceptance Criteria:**
-- [x] Cookie-bearing 请求在 Flutter 侧限制为 `https://chaoxing.com` 和 `https://*.chaoxing.com`。
+- [x] Cookie-bearing 请求在 Flutter 侧限制为显式学习通 HTTPS 主机 allowlist，不接受任意子域。
 - [x] Cookie-bearing 请求在 Worker 侧同样限制为 `https://chaoxing.com` 和 `https://*.chaoxing.com`。
 - [x] 手动校验 redirect，避免自动跟随到非 allowlist 域名并携带 Cookie。
 - [x] 错误信息和诊断摘要不得包含 Cookie 明文。
 - [x] 手动 Cookie 输入保存成功后不在设置页明文回填。
-- [ ] 诊断导出功能需继续确保 URL query token、Cookie 片段、个人敏感字段脱敏。
+- [x] Windows 内置 WebView2 登录可从 Cookie Store 导入 HttpOnly Cookie，且不在 UI 或日志展示 Cookie。
+- [x] 诊断导出统一脱敏 URL query token、Cookie 片段和账号类参数。
 
 ### Story 4: 补漏课程空间和考试列表
 
@@ -114,11 +120,11 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 **So that** 未发通知或通知被清理的作业/考试也能进入待办
 
 **Acceptance Criteria:**
-- [ ] App 能抓取课程空间中的课程/班级列表。
-- [ ] App 能抓取课程作业列表并解析未完成作业、入口 URL 和截止时间。
-- [ ] App 能抓取考试/测验列表并解析可作答状态、入口 URL 和截止时间。
-- [ ] 同一事项来自收件箱和课程列表时不重复展示、不重复提醒。
-- [ ] item 保留来源列表，例如 inbox、course_work、course_exam。
+- [x] App 能抓取课程空间中的课程/班级列表。
+- [x] App 能抓取课程作业列表并解析未完成作业、入口 URL 和截止时间。
+- [x] App 能抓取考试/测验列表并解析可作答状态、入口 URL 和截止时间。
+- [x] 同一业务 ID 的事项来自收件箱和课程列表时合并展示并复用提醒 ID。
+- [x] item 保留来源列表，例如 inbox、course_work、course_exam。
 
 ### Story 5: 打包、发布和回归验证
 
@@ -127,10 +133,10 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 **So that** 每次修改后都能确认 Windows App 可交付
 
 **Acceptance Criteria:**
-- [ ] CI 增加 Windows job，至少运行 `flutter analyze`、`flutter test`、`flutter build windows`。
-- [ ] 发布产物包含 Windows release exe 或安装包。
-- [ ] 发布说明明确 Cookie 存储、安全边界、真实账号端到端验证状态和已知限制。
-- [ ] 打包流程不包含 `.dev.vars`、真实 Cookie、个人账号数据或 fixture 中的敏感内容。
+- [x] CI 增加 Windows job，至少运行 `flutter analyze`、`flutter test`、`flutter build windows`。
+- [x] 发布产物包含 Windows release exe 或安装包。
+- [x] 发布说明明确 Cookie 存储、安全边界、真实账号端到端验证状态和已知限制。
+- [x] 打包流程在上传前审计 APK 和 Windows Release 内容，拒绝 `.dev.vars`、环境文件、测试/fixture 目录和本地运行时数据库；CI 从干净 checkout 构建，不注入真实 Cookie 或个人账号数据。
 
 ---
 
@@ -164,14 +170,14 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - User flow: App 启动或隐藏到托盘 -> 定时器触发 -> 本地同步 -> 计算提醒候选 -> 去重 -> 发送通知 -> 写入提醒历史。
 - Edge cases: 同步并发、网络失败、通知发送失败、截止时间变化、用户暂停通知。
 - Error handling: 同步失败时保留缓存；通知失败不阻断同步缓存保存；去重 key 包含 `itemId + remindRule + dueAtSnapshot`。
-- Current status: 自动刷新定时器、提醒去重结构已完成；真实 Windows toast 和托盘未完成。
+- Current status: 自动刷新定时器、提醒去重、Windows toast 和托盘代码已完成；关闭隐藏保持后台进程与测试通知后端调用已验证，通知可见性/点击和托盘菜单仍待手动验收。
 
 **Feature 5: Windows toast 与托盘工具形态**
 - Description: Windows App 关闭窗口后隐藏到托盘并继续按进程内定时器运行；系统通知用于提醒截止事项。
 - User flow: 用户启动 App -> 登录并同步 -> 关闭窗口 -> App 隐藏到托盘 -> 定时同步和通知继续 -> 用户从托盘恢复或退出。
 - Edge cases: 用户真正退出、Windows 通知权限不足、托盘插件初始化失败、重复点击立即同步。
 - Error handling: 退出后停止定时器和通知；托盘/通知失败需要有错误摘要和可恢复入口。
-- Current status: Phase 2 必做，尚未完成真实 Windows toast 和托盘。
+- Current status: Windows toast、通知点击恢复/打开详情、关闭隐藏和五项托盘菜单已接入；设置页提供不污染去重历史的可重复测试通知。关闭隐藏保持后台进程已验证，toast 可见性、通知点击和托盘菜单/退出尚待手动验收。
 
 ### Out of Scope
 
@@ -190,17 +196,22 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - 单次自动同步默认应避免并发；已有同步运行时新触发应跳过或合并。
 - 收件箱、详情、requirements 抓取需要受 limit 控制，避免频繁访问学习通触发风控。
 - App 在隐藏到托盘时继续运行进程内定时器，但真正退出后不得继续同步。
+- Windows runner 必须使用用户会话级命名 Mutex 保证单实例；重复启动不得创建第二套托盘、同步定时器或通知服务，并应尝试恢复已有主窗口。
 - UI 应优先展示缓存结果；网络失败或认证失败时不得清空已缓存 items。
 
 ### Security
 
 - Cookie 必须保存到 `flutter_secure_storage` 或等价平台安全存储，不得保存到 shared_preferences、日志、诊断导出、通知正文或 UI 明文回填。
 - 普通配置、同步缓存、提醒历史、提醒配置可以保存到 `shared_preferences`。
-- 所有带 Cookie 请求必须使用统一 HTTP 客户端，并限制目标为 `https://chaoxing.com` 或 `https://*.chaoxing.com`。
+- 所有 Flutter 带 Cookie 请求必须使用统一 HTTP 客户端，并限制目标为显式学习通 HTTPS 主机 allowlist；不得信任任意子域。
 - Flutter 侧和 Worker 侧均需保持 Cookie-bearing request allowlist。
 - Redirect 必须手动校验；不得自动跟随到非 allowlist 域名并继续携带 Cookie。
+- 详情页外部浏览器启动同样只允许显式学习通 HTTPS 主机；缓存中的第三方、HTTP 或畸形 URL 不得形成可点击外链，启动失败提示不得回显完整 URL。
+- 同步请求、WebView 顶层导航、详情外链和 Cookie Domain 必须复用独立 URL 策略模块；根域只可作为 Cookie Domain 作用域，实际网络与外链目标仍需命中显式请求主机集合。
 - 错误摘要、失败列表、诊断导出必须脱敏 Cookie、token、个人敏感 query 和可能包含账号信息的正文。
 - 手动 Cookie 输入不得接受换行注入；保存成功后清空输入框。
+- Cookie Source 在解析前执行源级 CR/LF 检查，命中后整份拒绝且不认证、不保存、不发送；设置页只展示预定义安全原因或通用保存失败消息。
+- 控制器加载历史配置时再次校验 Cookie Source；不安全值在内存中隔离为未配置，并通过专用 `clearCookie()` 删除凭据而不改其他偏好；清理失败不削弱内存隔离，不启动同步、不传入自定义 fetcher，提示仅要求重新登录且不回显原文。
 
 ### Integration
 
@@ -231,29 +242,39 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - Cookie 进入 secure storage；普通配置、缓存、提醒历史进入 shared_preferences。
 - 设置页不明文回填 Cookie。
 - App 本地同步能力已实现：认证检查、收件箱定位/分页、通知关键词筛选、通知详情链接提取、作业/考试页时间解析、`AppSyncResponse` 构建、排序、`displayStatus`、`dueInHours`。
-- Cookie-bearing 请求在 Flutter 和 Worker 两侧均限制 `https://chaoxing.com` / `https://*.chaoxing.com`，并手动校验 redirect。
+- Flutter Cookie-bearing 请求使用显式学习通主机 allowlist 并手动校验 redirect；Worker 侧维持原有学习通域名限制。
 - Windows 工具第一阶段已实现自动刷新定时器和提醒去重结构。
-- 验证已通过：`bun run typecheck`、`bun test`、`flutter analyze`、`flutter test`、`flutter build windows`。
+- 验证已通过：`bun run typecheck`、`bun test`、`flutter analyze`、`flutter test`、`flutter build windows`；2026-07-16 已完成真实账号登录、Cookie 自动导入与本地网络同步验收。
 
 **MVP Definition**: 在不依赖 Worker runtime 的前提下，Flutter App 能用本机学习通 Cookie 同步并展示作业/考试待办，Windows release build 可生成，核心安全边界和测试验证已到位。
 
 ### Phase 2: Windows 工具补齐和本地登录增强
 
-- 实现真实 Windows toast 通知，支持通知点击打开 App 或定位详情。
-- 实现 Windows 系统托盘，支持打开窗口、立即同步、暂停/恢复通知、查看登录状态、退出。
-- 实现关闭窗口隐藏到托盘，托盘运行时继续同步，托盘退出后停止同步和通知。
-- 提供内置登录或 Cookie 自动导入能力；保留手动 Cookie 导入 fallback。
-- 增加真实学习通账号端到端网络同步验证。
-- 增加 Windows CI job，覆盖 analyze/test/build。
-- 增加 Windows 打包发布流程。
+- Windows toast 通知与点击打开 App/定位详情代码已接入；真实环境测试通知后端调用成功，通知可见性和点击行为仍待人工观察。
+- Windows 系统托盘五项菜单代码已接入，待真实环境验收。
+- 关闭隐藏并保持托盘后台进程已通过真实环境验证；托盘菜单和明确退出仍待验收。
+- Windows 内置 WebView2 登录与 Cookie Store 自动导入已接入并通过真实账号验收；保留手动 Cookie 导入 fallback。
+- 真实学习通账号端到端网络同步已验证：通知与课程空间均成功同步，阶段失败数为 0，明确完成/只读事项能够过滤。
+- Windows CI job 已覆盖 analyze/test/build。
+- Windows x64 压缩包与 Android APK 已接入统一发布流程。
 
 ### Phase 3: 数据源补漏和诊断增强
 
-- 抓取课程空间课程/班级列表。
-- 抓取课程作业列表，补齐未发通知或通知被清理的作业。
-- 抓取考试/测验列表，补齐未发通知或通知被清理的考试。
-- 多数据源合并，避免重复展示和重复提醒。
-- 增加诊断页面和脱敏诊断导出。
+- 可选课程空间数据源已能抓取课程/班级列表。
+- 课程作业与考试任务页补抓、详情时间解析、明确完成状态过滤和逐课程/逐任务失败隔离已接入并通过真实账号验证；课程列表采用最多 6 个请求的有限并发，并在抓取后按原课程顺序确定性处理，仍需随页面变化持续补充 fixture。
+- 2026-07-16 同一真实账号对比：课程列表有限并发将完整同步从 26.5 秒降至 17.7 秒（缩短 33.2%），待办数、过滤统计和失败数保持一致。
+- 阶段耗时真实验证：总计 18.6 秒，认证 0.5 秒、通知列表 2.7 秒、通知详情 2.9 秒、任务详情 6.8 秒、课程扫描 5.7 秒；阶段之和等于总耗时，当前主要瓶颈为收件箱任务详情请求。
+- 收件箱任务详情并发从 6 提高到 8 的真实实验被回退：总耗时恶化到 113.9 秒、任务详情阶段升至 32.9 秒并产生 3 个失败，说明服务端或连接侧出现拥塞/限流；生产配置固定为 6 路。
+- 启动流程增加 5 分钟缓存新鲜期：近期缓存直接展示且不立即重复全量同步，保留手动刷新与原定时器，降低频繁重启触发服务端限流的风险。
+- 成功或部分成功同步后增加 60 秒手动刷新冷却，并显示剩余等待时间；配置变更、同步失败后的重试和静默定时刷新不受影响，阻止连续点击放大短期限流。
+- 默认同步与登录校验采用单次操作独立 HTTP 客户端，完成后必定关闭；桌面明确退出时关闭所有活跃客户端，停止未完成的真实网络请求并避免托盘长时间运行累积连接资源。
+- 重新登录或保存新同步配置会关闭旧配置的活跃默认客户端，新配置同步按现有单轮队列立即接管；旧响应仍按配置 revision 丢弃，缩短新 Cookie 导入等待并减少无效旧账号请求。
+- 同步失败摘要命中 HTTP 429、Too Many Requests、请求过频或限流信号时进入 5 分钟内存退避，手动刷新显示剩余等待、静默刷新跳过；保存新配置清除旧账号退避，避免服务端限流窗口被自动请求延长。
+- 启动加载缓存时按最近同步时间恢复未结束的限流退避和一分钟手动刷新冷却；未来时间戳不参与恢复，防止重启绕过保护或异常缓存造成无限等待。
+- `AppConfig` 在持久化读取、保存以及控制器加载/应用边界统一规范化：通知页数 1–20、条目数 1–500、课程数 1–100，非法低值回退安全默认；刷新周期允许 0 关闭，否则钳制为 15–180 分钟，防止损坏旧偏好或替换的存储实现绕过请求上限、创建过密定时器。
+- 多数据源按稳定业务 ID 合并并保留来源列表，避免重复展示和重复提醒。
+- 诊断页面、同步总耗时及认证/通知/通知详情/任务详情/课程五段耗时、失败摘要和脱敏复制导出已接入并通过 Flutter widget/test 验证；空结果可区分无消息、未命中通知、未发现任务入口、状态过滤和阶段失败。
+- 部分成功的同步会在主界面显示失败数量和诊断入口，但不直接渲染失败 URL、课程名或错误正文，避免用户误判同步完整性并减少敏感信息暴露。
 - 完善 fixture 管理和真实账号回归流程。
 
 ---
@@ -262,14 +283,14 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|-------------|--------|---------------------|
-| 没有真实学习通账号端到端网络同步验证 | High | High | Phase 2 将真实账号 E2E 验收列为必做；保留 fixture 测试作为回归基础，但不能替代真实网络验收。 |
+| 学习通真实页面变体覆盖仍有限 | Medium | High | 已完成真实账号 E2E 验收；保留脱敏阶段统计与 fixture 回归，遇到新页面变体时按精确失败阶段补样本。 |
 | Windows toast/托盘插件兼容性问题 | Medium | High | 先实现抽象层和 fake 测试，再做 Windows 手动验收；CI 增加 Windows build；失败时提供降级错误摘要。 |
 | 学习通页面结构变化导致解析失败 | Medium | High | 使用 fixture 覆盖关键页面；局部失败进入 failures；诊断导出脱敏后辅助定位；Phase 3 扩展多数据源补漏。 |
 | Cookie 泄漏到第三方域名、日志或诊断文件 | Low | High | 统一 HTTP 客户端 allowlist、手动 redirect 校验、secure storage、错误脱敏、安全审核清单。 |
 | 只依赖收件箱导致漏项 | High | Medium | Phase 3 增加课程空间、作业列表、考试列表补漏，并以稳定业务 ID 合并。 |
-| 通知重复轰炸 | Medium | Medium | 已实现提醒去重结构；后续 Windows toast 接入时必须使用 `itemId + remindRule + dueAtSnapshot` 写入历史。 |
+| 通知重复轰炸 | Medium | Medium | Windows toast 仅在系统通知调用成功后写入 `itemId + kind + dueAtSnapshot` 去重历史；处理前保留最近 90 天且最多 1000 条、丢弃异常未来时间；后续增加多规则提醒时需把规则 ID 纳入 key。 |
 | 风控、验证码或登录失效 | Medium | Medium | 不绕过风控；认证失败提示重新登录；降低自动同步频率；缓存保留。 |
-| Windows 打包产物包含敏感数据 | Low | High | 发布流程显式检查 `.dev.vars`、真实 Cookie、个人 fixture；CI/打包脚本不得注入本地 secrets。 |
+| Windows 打包产物包含敏感数据 | Low | High | APK 和 Windows Release 在上传前拒绝 `.dev.vars`、环境文件、测试/fixture 目录和本地数据库；CI 从干净 checkout 构建且不注入本地 secrets。 |
 
 ---
 
@@ -283,11 +304,10 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - CI 环境：需要 Windows runner 执行 Flutter analyze/test/build。
 
 **Known Blockers:**
-- 真实学习通账号端到端验收尚未完成：当前只能确认 fixture、单元测试和构建通过。
-- 真实 Windows toast 尚未完成：无法验证系统通知显示、点击行为和通知权限问题。
-- 系统托盘尚未完成：无法验证关闭隐藏、托盘菜单和真正退出后的进程行为。
-- 内置登录或 Cookie 自动导入尚未完成：当前仍需依赖已有 Cookie 同步路径或手动输入能力。
-- 课程空间/考试列表补漏尚未完成：当前仍有只靠收件箱通知漏项的产品风险。
+- Windows 测试通知后端调用已成功；仍需人工确认系统通知肉眼可见、点击行为和通知权限问题。
+- 系统托盘手动验收部分完成：关闭隐藏后进程继续运行已验证；仍需验证托盘菜单和真正退出后的进程行为。
+- 内置登录与 Cookie 自动导入已通过真实账号验证；后续仍需关注登录页面变体和 WebView2 运行时兼容性。
+- 课程空间补漏默认开启，使用当前 `courselistdata` 接口并回退旧 `backclazzdata`；真实账号已验证明确完成、已提交、已过期和只能查看/预览状态的过滤，仍需覆盖更多页面变体。
 
 ---
 
@@ -313,7 +333,7 @@ flutter test
 flutter build windows
 ```
 
-Expected: analyze pass; 23 tests pass; Windows release build pass.
+Expected: analyze pass; 110 tests pass; Windows release build pass.
 
 Windows artifact:
 

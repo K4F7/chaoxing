@@ -5,6 +5,8 @@ class AppConfig {
     required this.inboxItemLimit,
     required this.refreshMinutes,
     required this.remindersEnabled,
+    this.courseSourcesEnabled = true,
+    this.courseLimit = 20,
     this.legacyWorkerConfigDetected = false,
   });
 
@@ -13,9 +15,24 @@ class AppConfig {
   final int inboxItemLimit;
   final int refreshMinutes;
   final bool remindersEnabled;
+  final bool courseSourcesEnabled;
+  final int courseLimit;
   final bool legacyWorkerConfigDetected;
 
   bool get isConfigured => cookie.trim().isNotEmpty;
+
+  AppConfig normalized() {
+    return AppConfig(
+      cookie: cookie.trim(),
+      inboxPageLimit: _boundedOrDefault(inboxPageLimit, 1, 20, 3),
+      inboxItemLimit: _boundedOrDefault(inboxItemLimit, 1, 500, 60),
+      refreshMinutes: _normalizedRefreshMinutes(refreshMinutes),
+      remindersEnabled: remindersEnabled,
+      courseSourcesEnabled: courseSourcesEnabled,
+      courseLimit: _boundedOrDefault(courseLimit, 1, 100, 20),
+      legacyWorkerConfigDetected: legacyWorkerConfigDetected,
+    );
+  }
 
   AppConfig copyWith({
     String? cookie,
@@ -23,6 +40,8 @@ class AppConfig {
     int? inboxItemLimit,
     int? refreshMinutes,
     bool? remindersEnabled,
+    bool? courseSourcesEnabled,
+    int? courseLimit,
     bool? legacyWorkerConfigDetected,
   }) {
     return AppConfig(
@@ -31,6 +50,8 @@ class AppConfig {
       inboxItemLimit: inboxItemLimit ?? this.inboxItemLimit,
       refreshMinutes: refreshMinutes ?? this.refreshMinutes,
       remindersEnabled: remindersEnabled ?? this.remindersEnabled,
+      courseSourcesEnabled: courseSourcesEnabled ?? this.courseSourcesEnabled,
+      courseLimit: courseLimit ?? this.courseLimit,
       legacyWorkerConfigDetected:
           legacyWorkerConfigDetected ?? this.legacyWorkerConfigDetected,
     );
@@ -42,5 +63,27 @@ class AppConfig {
     inboxItemLimit: 60,
     refreshMinutes: 60,
     remindersEnabled: true,
+    courseSourcesEnabled: true,
+    courseLimit: 20,
   );
+}
+
+int _boundedOrDefault(int value, int minimum, int maximum, int fallback) {
+  if (value < minimum) {
+    return fallback;
+  }
+  return value > maximum ? maximum : value;
+}
+
+int _normalizedRefreshMinutes(int value) {
+  if (value == 0) {
+    return 0;
+  }
+  if (value < 0) {
+    return 60;
+  }
+  if (value < 15) {
+    return 15;
+  }
+  return value > 180 ? 180 : value;
 }

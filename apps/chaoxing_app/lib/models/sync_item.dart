@@ -18,7 +18,9 @@ class SyncItem {
     this.courseId,
     this.classId,
     this.workId,
+    this.examId,
     this.answerId,
+    this.sources = const [],
   });
 
   final String id;
@@ -35,7 +37,9 @@ class SyncItem {
   final String? courseId;
   final String? classId;
   final String? workId;
+  final String? examId;
   final String? answerId;
+  final List<String> sources;
 
   bool get isExam => kind == SyncItemKind.exam;
 
@@ -61,7 +65,9 @@ class SyncItem {
     String? courseId,
     String? classId,
     String? workId,
+    String? examId,
     String? answerId,
+    List<String>? sources,
   }) {
     return SyncItem(
       id: id ?? this.id,
@@ -78,7 +84,9 @@ class SyncItem {
       courseId: courseId ?? this.courseId,
       classId: classId ?? this.classId,
       workId: workId ?? this.workId,
+      examId: examId ?? this.examId,
       answerId: answerId ?? this.answerId,
+      sources: sources ?? this.sources,
     );
   }
 
@@ -100,7 +108,14 @@ class SyncItem {
       courseId: json.readNullableString('courseId'),
       classId: json.readNullableString('classId'),
       workId: json.readNullableString('workId'),
+      examId: json.readNullableString('examId'),
       answerId: json.readNullableString('answerId'),
+      sources: json['sources'] is List
+          ? (json['sources'] as List)
+                .whereType<String>()
+                .where((source) => source.isNotEmpty)
+                .toList()
+          : const [],
     );
   }
 
@@ -120,7 +135,9 @@ class SyncItem {
       'courseId': courseId,
       'classId': classId,
       'workId': workId,
+      'examId': examId,
       'answerId': answerId,
+      'sources': sources,
     };
   }
 

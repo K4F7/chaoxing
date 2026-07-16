@@ -1,4 +1,4 @@
-package com.example.chaoxing_app
+package com.sein.chaoxingapp
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:chaoxing_app/models/app_config.dart';
@@ -92,6 +93,93 @@ void main() {
     },
   );
 
+  test(
+    'accepts nested rows and string success in notice list responses',
+    () async {
+      final runner = LocalSyncRunner(
+        client: MockClient((request) async {
+          final url = request.url.toString();
+          if (url.startsWith('https://i.chaoxing.com/base')) {
+            return http.Response(
+              'https://notice.chaoxing.com/pc/notice/myNotice?s=nested',
+              200,
+            );
+          }
+          if (url.startsWith(
+            'https://notice.chaoxing.com/pc/notice/myNotice',
+          )) {
+            return http.Response("window.nowYear='2026';", 200);
+          }
+          return http.Response(
+            jsonEncode({
+              'status': 'true',
+              'data': {
+                'rows': [
+                  {'id': 'nested-1', 'noticeTitle': '作业通知', 'content': '请完成作业'},
+                ],
+                'finished': 1,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final result = await runner.fetchInboxMessages(
+        cookie: 'UID=1',
+        itemLimit: 20,
+        pageLimit: 2,
+      );
+
+      expect(result.pagesFetched, 1);
+      expect(result.messages.single.id, 'nested-1');
+      expect(result.messages.single.title, '作业通知');
+    },
+  );
+
+  test(
+    'extracts links from nested detail and protocol-relative URLs',
+    () async {
+      final runner = LocalSyncRunner(
+        client: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'success': '1',
+              'data': {
+                'detail': {
+                  'rtfContent':
+                      '<a href="//mooc1.chaoxing.com/work?workId=88">查看作业</a>',
+                },
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          ),
+        ),
+      );
+
+      final summary = await runner.fetchDetailSummary(
+        cookie: 'UID=1',
+        message: const InboxMessage(
+          id: 'nested-detail',
+          uuid: null,
+          title: '作业通知',
+          sender: null,
+          sendTime: null,
+          isRead: false,
+          content: null,
+          detailUrl: null,
+          sendTag: 0,
+        ),
+      );
+
+      expect(summary.assignmentLinks, [
+        'https://mooc1.chaoxing.com/work?workId=88',
+      ]);
+    },
+  );
+
   test('rejects untrusted assignment entry without sending cookie', () async {
     var requested = false;
     final runner = LocalSyncRunner(
@@ -161,6 +249,77 @@ void main() {
     },
   );
 
+  test('keeps trusted redirect cookies within their response host', () async {
+    final calls = <http.BaseRequest>[];
+    final runner = LocalSyncRunner(
+      client: MockClient((request) async {
+        calls.add(request);
+        if (request.url.path == '/work') {
+          return http.Response(
+            '',
+            302,
+            headers: {
+              'location': '/work/final?workId=1',
+              'set-cookie': 'hop=ready; Path=/; HttpOnly',
+            },
+            request: request,
+          );
+        }
+        expect(request.headers['Cookie'], contains('UID=1'));
+        expect(request.headers['Cookie'], contains('hop=ready'));
+        return http.Response(
+          '<title>作业作答</title><p>截止时间：2026-07-20 23:59</p>',
+          200,
+          headers: {'content-type': 'text/html; charset=utf-8'},
+          request: request,
+        );
+      }),
+    );
+
+    final requirement = await runner.fetchAssignmentRequirement(
+      entryUrl: 'https://mooc1.chaoxing.com/work?workId=1',
+      cookie: 'UID=1',
+      summary: const DetailSummary(
+        title: '作业通知',
+        sendTime: null,
+        content: null,
+        assignmentLinks: [],
+      ),
+    );
+
+    expect(requirement.finalUrl, contains('/work/final'));
+    expect(calls, hasLength(2));
+  });
+
+  test('does not resend account cookies to the login host', () async {
+    final runner = LocalSyncRunner(
+      client: MockClient((request) async {
+        if (request.url.host == 'i.chaoxing.com') {
+          expect(request.headers['Cookie'], contains('UID=1'));
+          return http.Response(
+            '',
+            302,
+            headers: {'location': 'https://passport2.chaoxing.com/login'},
+            request: request,
+          );
+        }
+        expect(request.url.host, 'passport2.chaoxing.com');
+        expect(request.headers['Cookie'], isNull);
+        return http.Response(
+          '<title>用户登录</title><button id="loginBtn">登录</button>',
+          200,
+          headers: {'content-type': 'text/html; charset=utf-8'},
+          request: request,
+        );
+      }),
+    );
+
+    final auth = await runner.checkAuth('UID=1');
+
+    expect(auth.authenticated, isFalse);
+    expect(auth.loginDetected, isTrue);
+  });
+
   test('fails detail summary when API status is not true', () async {
     final runner = LocalSyncRunner(
       client: MockClient(
@@ -197,11 +356,78 @@ void main() {
     );
   });
 
+  test('fails detail summary when API success status is missing', () async {
+    final runner = LocalSyncRunner(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'msg': {'rtf_content': 'https://mooc1.chaoxing.com/work?workId=1'},
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+
+    await expectLater(
+      runner.fetchDetailSummary(
+        cookie: 'UID=1',
+        message: const InboxMessage(
+          id: 'notice-1',
+          uuid: null,
+          title: '作业通知',
+          sender: null,
+          sendTime: null,
+          isRead: false,
+          content: null,
+          detailUrl: null,
+          sendTag: 0,
+        ),
+      ),
+      throwsA(isA<LocalSyncException>()),
+    );
+  });
+
+  test('fails notice list when API success status is missing', () async {
+    final runner = LocalSyncRunner(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.startsWith('https://i.chaoxing.com/base')) {
+          return http.Response(
+            'https://notice.chaoxing.com/pc/notice/myNotice?s=missing',
+            200,
+          );
+        }
+        if (url.startsWith('https://notice.chaoxing.com/pc/notice/myNotice')) {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+        return http.Response(
+          jsonEncode({
+            'notices': {
+              'list': [
+                {'id': 'notice-1', 'title': '作业通知'},
+              ],
+              'lastPage': true,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+
+    await expectLater(
+      runner.fetchInboxMessages(cookie: 'UID=1', itemLimit: 20, pageLimit: 1),
+      throwsA(isA<LocalSyncException>()),
+    );
+  });
+
   test('runs local sync and builds sorted app response', () async {
     final calls = <String>[];
     final runner = LocalSyncRunner(
       clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
       client: MockClient((request) async {
+        await Future<void>.delayed(const Duration(milliseconds: 2));
         final url = request.url.toString();
         calls.add('${request.method} $url');
 
@@ -300,6 +526,7 @@ void main() {
       }),
     );
 
+    final progress = <SyncProgress>[];
     final response = await runner.run(
       const AppConfig(
         cookie: 'UID=1',
@@ -308,17 +535,226 @@ void main() {
         refreshMinutes: 60,
         remindersEnabled: true,
       ),
+      onProgress: progress.add,
     );
 
     expect(response.authStatus, 'ok');
+    expect(response.stats.durationMs, greaterThan(0));
+    expect(response.stats.authenticationMs, greaterThan(0));
+    expect(response.stats.inboxMs, greaterThan(0));
+    expect(response.stats.noticeDetailsMs, greaterThan(0));
+    expect(response.stats.assignmentDetailsMs, greaterThan(0));
+    expect(
+      response.stats.authenticationMs +
+          response.stats.inboxMs +
+          response.stats.noticeDetailsMs +
+          response.stats.assignmentDetailsMs +
+          response.stats.coursesMs,
+      lessThanOrEqualTo(response.stats.durationMs),
+    );
     expect(response.items.map((item) => item.id), ['assignment-1', 'exam-2']);
     expect(response.items.first.displayStatus, SyncDisplayStatus.today);
     expect(response.items.first.dueInHours, 15);
     expect(response.items.last.displayStatus, SyncDisplayStatus.upcoming);
     expect(
+      progress.map((entry) => entry.phase),
+      containsAllInOrder([
+        SyncPhase.authentication,
+        SyncPhase.inbox,
+        SyncPhase.noticeDetails,
+        SyncPhase.assignmentDetails,
+        SyncPhase.courses,
+        SyncPhase.finalizing,
+      ]),
+    );
+    expect(
       calls,
       contains('POST https://notice.chaoxing.com/pc/notice/getNoticeList'),
     );
+  });
+
+  test(
+    'limits notice detail concurrency and isolates individual failures',
+    () async {
+      final releaseDetails = Completer<void>();
+      final sixDetailsStarted = Completer<void>();
+      var activeDetails = 0;
+      var maxActiveDetails = 0;
+      final runner = LocalSyncRunner(
+        client: MockClient((request) async {
+          final url = request.url.toString();
+          if (url.startsWith('https://i.chaoxing.com/base')) {
+            return http.Response(
+              'https://notice.chaoxing.com/pc/notice/myNotice?s=parallel',
+              200,
+            );
+          }
+          if (url.startsWith(
+            'https://notice.chaoxing.com/pc/notice/myNotice',
+          )) {
+            return http.Response("window.nowYear='2026';", 200);
+          }
+          if (request.method == 'POST' &&
+              url == 'https://notice.chaoxing.com/pc/notice/getNoticeList') {
+            return http.Response(
+              jsonEncode({
+                'status': true,
+                'notices': {
+                  'list': List.generate(
+                    8,
+                    (index) => {
+                      'id': 'notice-$index',
+                      'title': '作业通知 $index',
+                      'sendTag': 0,
+                    },
+                  ),
+                  'lastPage': true,
+                },
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
+          if (url.contains('/getNoticeDetail')) {
+            activeDetails += 1;
+            maxActiveDetails = maxActiveDetails < activeDetails
+                ? activeDetails
+                : maxActiveDetails;
+            if (activeDetails == 6 && !sixDetailsStarted.isCompleted) {
+              sixDetailsStarted.complete();
+            }
+            await releaseDetails.future;
+            activeDetails -= 1;
+            if (url.contains('notice-3/')) {
+              return http.Response('failed', 500);
+            }
+            return http.Response(
+              jsonEncode({
+                'status': true,
+                'msg': {'content': '没有链接'},
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final sync = runner.run(
+        const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+          courseSourcesEnabled: false,
+        ),
+      );
+      await sixDetailsStarted.future.timeout(const Duration(seconds: 2));
+      expect(maxActiveDetails, 6);
+      releaseDetails.complete();
+
+      final response = await sync;
+      expect(response.stats.relevantNotices, 8);
+      expect(response.stats.detailSummaries, 7);
+      expect(response.failures, hasLength(1));
+      expect(activeDetails, 0);
+    },
+  );
+
+  test('caps inbox assignment detail concurrency at six', () async {
+    final releaseAssignments = Completer<void>();
+    final sixAssignmentsStarted = Completer<void>();
+    var activeAssignments = 0;
+    var maxActiveAssignments = 0;
+    final runner = LocalSyncRunner(
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        if (url.startsWith('https://i.chaoxing.com/base')) {
+          return http.Response(
+            'https://notice.chaoxing.com/pc/notice/myNotice?s=assignments',
+            200,
+          );
+        }
+        if (url.startsWith('https://notice.chaoxing.com/pc/notice/myNotice')) {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+        if (request.method == 'POST' &&
+            url == 'https://notice.chaoxing.com/pc/notice/getNoticeList') {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'notices': {
+                'list': List.generate(
+                  10,
+                  (index) => {
+                    'id': 'notice-$index',
+                    'title': '作业通知 $index',
+                    'sendTag': 0,
+                  },
+                ),
+                'lastPage': true,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (url.contains('/getNoticeDetail')) {
+          final id = RegExp(r'notice-(\d+)').firstMatch(url)!.group(1)!;
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'msg': {
+                'rtf_content': 'https://mooc1.chaoxing.com/work?workId=$id',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (request.url.host == 'mooc1.chaoxing.com' &&
+            request.url.path == '/work') {
+          activeAssignments += 1;
+          maxActiveAssignments = maxActiveAssignments < activeAssignments
+              ? activeAssignments
+              : maxActiveAssignments;
+          if (activeAssignments == 6 && !sixAssignmentsStarted.isCompleted) {
+            sixAssignmentsStarted.complete();
+          }
+          await releaseAssignments.future;
+          activeAssignments -= 1;
+          final id = request.url.queryParameters['workId']!;
+          return http.Response(
+            '<title>作业作答</title><input id="workId" value="$id" />'
+            '<p>截止时间：2026-07-20 23:59</p>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final sync = runner.run(
+      const AppConfig(
+        cookie: 'UID=1',
+        inboxPageLimit: 1,
+        inboxItemLimit: 20,
+        refreshMinutes: 60,
+        remindersEnabled: true,
+        courseSourcesEnabled: false,
+      ),
+    );
+    await sixAssignmentsStarted.future.timeout(const Duration(seconds: 2));
+    expect(maxActiveAssignments, 6);
+    releaseAssignments.complete();
+
+    final response = await sync;
+    expect(response.items, hasLength(10));
+    expect(response.failures, isEmpty);
+    expect(activeAssignments, 0);
   });
 
   test('parses chaoxing time without year using source send time', () {
@@ -329,6 +765,75 @@ void main() {
     );
 
     expect(parsed?.toUtc().toIso8601String(), '2026-01-02T00:30:00.000Z');
+  });
+
+  test('fails a stalled request with a safe timeout error', () async {
+    final runner = LocalSyncRunner(
+      requestTimeout: const Duration(milliseconds: 10),
+      client: MockClient((_) => Completer<http.Response>().future),
+    );
+
+    await expectLater(
+      runner.checkAuth('UID=secret'),
+      throwsA(
+        isA<LocalSyncException>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains('请求 i.chaoxing.com 超时'), isNot(contains('secret'))),
+        ),
+      ),
+    );
+  });
+
+  test('applies one timeout budget to the full redirect chain', () async {
+    var calls = 0;
+    final runner = LocalSyncRunner(
+      requestTimeout: const Duration(milliseconds: 100),
+      client: MockClient((request) async {
+        calls += 1;
+        await Future<void>.delayed(const Duration(milliseconds: 70));
+        if (calls == 1) {
+          return http.Response(
+            '',
+            302,
+            headers: {'location': '/next'},
+            request: request,
+          );
+        }
+        return http.Response('ok', 200, request: request);
+      }),
+    );
+
+    await expectLater(
+      runner.checkAuth('UID=1'),
+      throwsA(isA<LocalSyncException>()),
+    );
+    expect(calls, 2);
+  });
+
+  test('keeps assignments whose deadline cannot be parsed', () {
+    const requirement = AssignmentRequirement(
+      sourceTitle: '高等数学作业',
+      sourceSendTime: null,
+      sourceContent: null,
+      entryUrl: 'https://mooc1.chaoxing.com/work?workId=9',
+      finalUrl: 'https://mooc1.chaoxing.com/work?workId=9',
+      pageTitle: '作业',
+      status: 200,
+      courseId: '1',
+      classId: '2',
+      workId: '9',
+      answerId: null,
+      workStatus: 'answering',
+      timeWindowStart: null,
+      timeWindowEnd: null,
+    );
+
+    final item = buildSyncItem(requirement, DateTime(2026, 7, 16));
+
+    expect(item.id, 'assignment-9');
+    expect(item.dueAt, isNull);
+    expect(item.displayStatus, SyncDisplayStatus.unscheduled);
   });
 
   test('resolves relative inbox links against notice host', () {

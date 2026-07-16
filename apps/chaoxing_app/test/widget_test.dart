@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:chaoxing_app/main.dart';
 import 'package:chaoxing_app/models/app_config.dart';
 import 'package:chaoxing_app/models/app_sync_response.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/screens/settings_screen.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
+import 'package:chaoxing_app/services/local_sync_runner.dart';
 import 'package:chaoxing_app/state/app_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,10 +22,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('配置学习通 Cookie'), findsOneWidget);
-    await tester.tap(find.text('打开设置'));
+    await tester.tap(find.text('手动导入 Cookie'));
     await tester.pumpAndSettle();
     expect(find.text('学习通 Cookie'), findsOneWidget);
   });
+
+  testWidgets(
+    'opens diagnostics from the app bar without a configured cookie',
+    (tester) async {
+      final controller = AppController(MemoryAppStorage());
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(ChaoxingApp(controller: controller));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('诊断'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('同步诊断'), findsOneWidget);
+      expect(find.text('尚未同步'), findsOneWidget);
+      expect(find.text('复制脱敏诊断'), findsOneWidget);
+    },
+  );
 
   testWidgets('shows synced assignments on the todo screen', (tester) async {
     final controller = AppController(
@@ -62,6 +82,119 @@ void main() {
     expect(find.text('未来待办'), findsOneWidget);
   });
 
+  testWidgets('surfaces partial sync failures without exposing details', (
+    tester,
+  ) async {
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 3,
+          inboxItemLimit: 60,
+          refreshMinutes: 0,
+          remindersEnabled: true,
+        ),
+      ),
+      fetcher: (_) async => AppSyncResponse(
+        lastSyncedAt: DateTime(2026, 7, 16, 8),
+        authStatus: 'ok',
+        items: const [],
+        failures: const [
+          AppSyncFailure(
+            entryUrl: 'https://example.com/private-task',
+            sourceTitle: 'private-course-title',
+            message: 'private-failure-detail',
+          ),
+        ],
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(ChaoxingApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('部分数据源同步失败（1）'), findsOneWidget);
+    expect(find.text('查看诊断'), findsOneWidget);
+    expect(find.textContaining('private-course-title'), findsNothing);
+    expect(find.textContaining('private-failure-detail'), findsNothing);
+
+    await tester.tap(find.text('查看诊断'));
+    await tester.pumpAndSettle();
+    expect(find.text('同步诊断'), findsOneWidget);
+  });
+
+  testWidgets('shows the current stage while a sync is running', (
+    tester,
+  ) async {
+    final completer = Completer<AppSyncResponse>();
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 3,
+          inboxItemLimit: 60,
+          refreshMinutes: 0,
+          remindersEnabled: true,
+        ),
+      ),
+      fetcher: (_) => completer.future,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(ChaoxingApp(controller: controller));
+    await tester.pump();
+
+    expect(find.text('验证登录态 0/1'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    completer.complete(
+      AppSyncResponse(
+        lastSyncedAt: DateTime(2026, 7, 16, 8),
+        authStatus: 'ok',
+        items: const [],
+        failures: const [],
+      ),
+    );
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('shows assignments without a parsed deadline', (tester) async {
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 3,
+          inboxItemLimit: 60,
+          refreshMinutes: 0,
+          remindersEnabled: true,
+        ),
+      ),
+      fetcher: (_) async => AppSyncResponse(
+        lastSyncedAt: DateTime(2026, 7, 16, 8),
+        authStatus: 'ok',
+        failures: const [],
+        items: const [
+          SyncItem(
+            id: 'assignment-no-deadline',
+            kind: SyncItemKind.assignment,
+            title: '未标截止时间的作业',
+            url: 'https://mooc1.chaoxing.com/work?workId=1',
+            sourceTitle: '高等数学',
+            status: 'answering',
+            displayStatus: SyncDisplayStatus.unscheduled,
+          ),
+        ],
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(ChaoxingApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('未标截止时间的作业'), findsOneWidget);
+    expect(find.text('未识别截止时间'), findsOneWidget);
+  });
+
   testWidgets('settings screen never renders saved cookie and preserves it', (
     tester,
   ) async {
@@ -86,18 +219,113 @@ void main() {
     expect(find.textContaining('UID=real'), findsNothing);
     expect(find.textContaining('vc=secret'), findsNothing);
 
-    await tester.tap(find.text('保存并同步'));
+    final saveButton = find.widgetWithText(FilledButton, '保存并同步');
+    await tester.scrollUntilVisible(
+      saveButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
     expect(saved?.cookie, 'UID=real; vc=secret');
     expect(find.textContaining('UID=real'), findsNothing);
 
-    await tester.enterText(find.byType(TextField).first, 'UID=new; vc=next');
-    await tester.tap(find.text('保存并同步'));
+    final cookieField = find.byType(TextField).first;
+    await tester.scrollUntilVisible(
+      cookieField,
+      -200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(cookieField, 'UID=new; vc=next');
+    await tester.pump(const Duration(seconds: 5));
+    await tester.scrollUntilVisible(
+      saveButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
     expect(saved?.cookie, 'UID=new; vc=next');
     expect(find.textContaining('UID=new'), findsNothing);
     expect(find.textContaining('vc=next'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 5));
+    final clearButton = find.widgetWithText(TextButton, '清除');
+    await tester.scrollUntilVisible(
+      clearButton,
+      -200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(clearButton);
+    await tester.pumpAndSettle();
+    expect(find.text('保存时将清除 Cookie'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      saveButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(saved?.cookie, isEmpty);
+  });
+
+  testWidgets('settings can send a Windows notification test', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          onTestNotification: () async {
+            calls += 1;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    final testButton = find.widgetWithText(OutlinedButton, '发送测试通知');
+    await tester.scrollUntilVisible(
+      testButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+
+    expect(calls, 1);
+    expect(find.text('测试通知已发送；点击通知应恢复主窗口'), findsOneWidget);
+  });
+
+  testWidgets('settings shows a safe cookie validation error', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async =>
+              throw const LocalSyncException('Cookie 格式不安全或无有效字段，请重新登录或检查手动输入'),
+        ),
+      ),
+    );
+
+    final saveButton = find.widgetWithText(FilledButton, '保存并同步');
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(saveButton, findsOneWidget);
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cookie 格式不安全或无有效字段，请重新登录或检查手动输入'), findsOneWidget);
+    expect(find.textContaining('LocalSyncException'), findsNothing);
   });
 }

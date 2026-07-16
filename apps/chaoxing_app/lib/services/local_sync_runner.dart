@@ -1,15 +1,32 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:html/dom.dart' as html_dom;
+import 'package:html/parser.dart' as html_parser;
 import 'package:http/http.dart' as http;
 
 import '../models/app_config.dart';
 import '../models/app_sync_response.dart';
 import '../models/sync_item.dart';
+import '../utils/redaction.dart';
+import 'chaoxing_cookie_store.dart';
+import 'chaoxing_url_policy.dart';
+
+export 'chaoxing_url_policy.dart';
 
 const defaultChaoxingHomeUrl =
     'https://i.chaoxing.com/base?ws=1&t=1780231212848';
 const _noticeOrigin = 'https://notice.chaoxing.com';
+const _courseApiOrigin = 'https://mooc1-api.chaoxing.com';
+const _courseListUrl = '$_courseApiOrigin/mycourse/backclazzdata';
+const _modernCourseListOrigin = 'https://mooc1-1.chaoxing.com';
+const _modernCourseListUrl =
+    '$_modernCourseListOrigin/mooc-ans/visit/courselistdata';
 const _maxCookieRedirects = 5;
+const _noticeDetailConcurrency = 6;
+const _assignmentDetailConcurrency = 6;
+const _courseListConcurrency = 3;
+const _courseDetailConcurrency = 6;
 
 class LocalSyncException implements Exception {
   const LocalSyncException(this.message);
@@ -35,6 +52,36 @@ class AuthCheckResult {
   final String finalUrl;
   final String? title;
 }
+
+enum SyncPhase {
+  authentication,
+  inbox,
+  noticeDetails,
+  assignmentDetails,
+  courses,
+  finalizing,
+}
+
+class SyncProgress {
+  const SyncProgress({required this.phase, this.completed = 0, this.total = 0});
+
+  final SyncPhase phase;
+  final int completed;
+  final int total;
+
+  String get label => switch (phase) {
+    SyncPhase.authentication => '验证登录态',
+    SyncPhase.inbox => '读取通知',
+    SyncPhase.noticeDetails => '解析通知详情',
+    SyncPhase.assignmentDetails => '解析作业考试',
+    SyncPhase.courses => '扫描课程空间',
+    SyncPhase.finalizing => '整理同步结果',
+  };
+
+  String get description => total > 0 ? '$label $completed/$total' : label;
+}
+
+typedef SyncProgressCallback = void Function(SyncProgress progress);
 
 class InboxFetchResult {
   const InboxFetchResult({
@@ -104,6 +151,7 @@ class AssignmentRequirement {
     required this.workStatus,
     required this.timeWindowStart,
     required this.timeWindowEnd,
+    this.source = 'inbox',
   });
 
   final String sourceTitle;
@@ -120,75 +168,263 @@ class AssignmentRequirement {
   final String workStatus;
   final String? timeWindowStart;
   final String? timeWindowEnd;
+  final String source;
+}
+
+class CourseSpace {
+  const CourseSpace({
+    required this.courseId,
+    required this.classId,
+    required this.cpi,
+    required this.title,
+  });
+
+  final String courseId;
+  final String classId;
+  final String cpi;
+  final String title;
+}
+
+class CourseTaskLink {
+  const CourseTaskLink({
+    required this.url,
+    required this.title,
+    this.status = 'unknown',
+  });
+
+  final String url;
+  final String title;
+  final String status;
+
+  bool get isActionable => isActionableWorkStatus(status);
+}
+
+class _CourseSourceStats {
+  const _CourseSourceStats({
+    this.courses = 0,
+    this.taskLinksDiscovered = 0,
+    this.taskLinks = 0,
+    this.statusFiltered = 0,
+  });
+
+  final int courses;
+  final int taskLinksDiscovered;
+  final int taskLinks;
+  final int statusFiltered;
+}
+
+class _CourseDiscoveryResult {
+  const _CourseDiscoveryResult({required this.courses, required this.cookie});
+
+  final List<CourseSpace> courses;
+  final String cookie;
+}
+
+class _CookieSession {
+  _CookieSession(this.source);
+
+  String source;
 }
 
 class LocalSyncRunner {
   LocalSyncRunner({
     http.Client? client,
     DateTime Function()? clock,
+    this.requestTimeout = const Duration(seconds: 20),
     this._homeUrl = defaultChaoxingHomeUrl,
   }) : _client = client ?? http.Client(),
        _clock = clock ?? DateTime.now;
 
   final http.Client _client;
   final DateTime Function() _clock;
+  final Duration requestTimeout;
   final String _homeUrl;
 
-  Future<AppSyncResponse> run(AppConfig config) async {
+  void close() => _client.close();
+
+  Future<AppSyncResponse> run(
+    AppConfig config, {
+    SyncProgressCallback? onProgress,
+  }) async {
+    final syncStopwatch = Stopwatch()..start();
+    var authenticationMs = 0;
+    var inboxMs = 0;
+    var noticeDetailsMs = 0;
+    var assignmentDetailsMs = 0;
+    var coursesMs = 0;
+    var phaseStartedAt = 0;
     final cookie = config.cookie.trim();
     if (cookie.isEmpty) {
       throw const LocalSyncException('请先在设置中填入学习通 Cookie');
     }
 
+    onProgress?.call(
+      const SyncProgress(phase: SyncPhase.authentication, total: 1),
+    );
     final auth = await checkAuth(cookie);
     if (!auth.authenticated) {
       throw const LocalSyncException('Cookie 已失效或跳转到登录页，请重新登录后更新 Cookie');
     }
+    onProgress?.call(
+      const SyncProgress(
+        phase: SyncPhase.authentication,
+        completed: 1,
+        total: 1,
+      ),
+    );
+    authenticationMs = syncStopwatch.elapsedMilliseconds;
+    phaseStartedAt = authenticationMs;
 
+    onProgress?.call(const SyncProgress(phase: SyncPhase.inbox, total: 1));
     final inbox = await fetchInboxMessages(
       cookie: cookie,
       itemLimit: config.inboxItemLimit,
       pageLimit: config.inboxPageLimit,
     );
+    onProgress?.call(
+      const SyncProgress(phase: SyncPhase.inbox, completed: 1, total: 1),
+    );
+    inboxMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
+    phaseStartedAt = syncStopwatch.elapsedMilliseconds;
     final relevant = inbox.messages.where(isAssignmentOrExamRelated).toList();
     final summaries = <DetailSummary>[];
-    for (final message in relevant.take(config.inboxItemLimit)) {
-      summaries.add(await fetchDetailSummary(message: message, cookie: cookie));
-    }
+    final failures = <AppSyncFailure>[];
+    final noticesToParse = relevant.take(config.inboxItemLimit).toList();
+    onProgress?.call(
+      SyncProgress(
+        phase: SyncPhase.noticeDetails,
+        total: noticesToParse.length,
+      ),
+    );
+    var completedNoticeDetails = 0;
+    await _forEachConcurrent(noticesToParse, _noticeDetailConcurrency, (
+      message,
+      _,
+    ) async {
+      try {
+        summaries.add(
+          await fetchDetailSummary(message: message, cookie: cookie),
+        );
+      } catch (error) {
+        failures.add(
+          AppSyncFailure(
+            entryUrl: redactSensitiveUrl(
+              message.detailUrl ?? 'notice:${message.id}',
+            ),
+            sourceTitle: redactSensitiveText(message.title),
+            message: error is LocalSyncException
+                ? redactSensitiveText(
+                    error.message,
+                    secrets: chaoxingCookieSecrets(cookie),
+                  )
+                : '通知详情解析失败',
+          ),
+        );
+      }
+      completedNoticeDetails += 1;
+      onProgress?.call(
+        SyncProgress(
+          phase: SyncPhase.noticeDetails,
+          completed: completedNoticeDetails,
+          total: noticesToParse.length,
+        ),
+      );
+    });
+    noticeDetailsMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
+    phaseStartedAt = syncStopwatch.elapsedMilliseconds;
 
     final unique = collectUniqueWorkLinks(summaries);
     final items = <SyncItem>[];
-    final failures = <AppSyncFailure>[];
-    for (final entry in unique.entries) {
+    final uniqueEntries = unique.entries.toList();
+    var statusFilteredItems = 0;
+    onProgress?.call(
+      SyncProgress(
+        phase: SyncPhase.assignmentDetails,
+        total: uniqueEntries.length,
+      ),
+    );
+    var completedAssignmentDetails = 0;
+    await _forEachConcurrent(uniqueEntries, _assignmentDetailConcurrency, (
+      entry,
+      _,
+    ) async {
       try {
         final requirement = await fetchAssignmentRequirement(
           entryUrl: entry.key,
           summary: entry.value,
           cookie: cookie,
         );
-        final item = buildSyncItem(requirement, _clock());
-        if (item != null) {
-          items.add(item);
+        if (isActionableWorkStatus(requirement.workStatus)) {
+          items.add(buildSyncItem(requirement, _clock()));
+        } else {
+          statusFilteredItems += 1;
         }
       } catch (error) {
         failures.add(
           AppSyncFailure(
-            entryUrl: entry.key,
-            sourceTitle: entry.value.title,
+            entryUrl: redactSensitiveUrl(entry.key),
+            sourceTitle: redactSensitiveText(entry.value.title),
             message: error is LocalSyncException
-                ? _redactSecret(error.message, cookie)
+                ? redactSensitiveText(
+                    error.message,
+                    secrets: chaoxingCookieSecrets(cookie),
+                  )
                 : '作业详情解析失败',
           ),
         );
       }
-    }
+      completedAssignmentDetails += 1;
+      onProgress?.call(
+        SyncProgress(
+          phase: SyncPhase.assignmentDetails,
+          completed: completedAssignmentDetails,
+          total: uniqueEntries.length,
+        ),
+      );
+    });
+    assignmentDetailsMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
+    phaseStartedAt = syncStopwatch.elapsedMilliseconds;
 
+    var courseStats = const _CourseSourceStats();
+    if (config.courseSourcesEnabled) {
+      courseStats = await _appendCourseSourceItems(
+        cookie: cookie,
+        courseLimit: config.courseLimit,
+        itemLimit: config.inboxItemLimit,
+        items: items,
+        failures: failures,
+        onProgress: onProgress,
+      );
+    }
+    coursesMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
+
+    onProgress?.call(const SyncProgress(phase: SyncPhase.finalizing));
     final now = _clock();
     return AppSyncResponse.build(
       now: now,
       lastSyncedAt: now,
       items: items,
       failures: failures,
+      stats: SyncStats(
+        durationMs: syncStopwatch.elapsedMilliseconds,
+        authenticationMs: authenticationMs,
+        inboxMs: inboxMs,
+        noticeDetailsMs: noticeDetailsMs,
+        assignmentDetailsMs: assignmentDetailsMs,
+        coursesMs: coursesMs,
+        inboxMessages: inbox.messages.length,
+        relevantNotices: relevant.length,
+        detailSummaries: summaries.length,
+        inboxTaskLinks: unique.length,
+        inboxTaskDetails: uniqueEntries.length,
+        statusFilteredItems: statusFilteredItems,
+        courses: courseStats.courses,
+        courseTaskLinksDiscovered: courseStats.taskLinksDiscovered,
+        courseTaskLinks: courseStats.taskLinks,
+        courseTaskStatusFiltered: courseStats.statusFiltered,
+        itemCandidates: items.map((item) => item.id).toSet().length,
+        courseSourcesEnabled: config.courseSourcesEnabled,
+      ),
     );
   }
 
@@ -207,7 +443,7 @@ class LocalSyncRunner {
           !loginDetected,
       statusCode: response.statusCode,
       loginDetected: loginDetected,
-      finalUrl: finalUrl,
+      finalUrl: redactSensitiveUrl(finalUrl),
       title: extractPageTitle(html),
     );
   }
@@ -244,15 +480,15 @@ class LocalSyncRunner {
       );
       pagesFetched += 1;
 
-      if (data['status'] != true) {
+      if (!_hasSuccessfulApiStatus(data)) {
         throw LocalSyncException(_readString(data, 'msg', '通知列表抓取失败'));
       }
 
-      final notices = data['notices'] is Map ? data['notices'] as Map : {};
+      final page = _extractNoticePage(data);
       final rawMessages = <Object?>[
-        if (lastGetId.isEmpty) ..._readList(data['topNotices']),
-        if (lastGetId.isEmpty) ..._readList(data['urgentNotices']),
-        ..._readList(notices['list']),
+        if (lastGetId.isEmpty) ...page.topNotices,
+        if (lastGetId.isEmpty) ...page.urgentNotices,
+        ...page.items,
       ];
 
       for (final notice in rawMessages) {
@@ -264,12 +500,8 @@ class LocalSyncRunner {
         }
       }
 
-      lastGetId = _stringOrEmpty(notices['lastGetId']);
-      lastPage =
-          notices['lastPage'] == true ||
-          notices['lastPage'] == 1 ||
-          rawMessages.isEmpty ||
-          lastGetId.isEmpty;
+      lastGetId = page.lastGetId;
+      lastPage = page.lastPage || rawMessages.isEmpty || lastGetId.isEmpty;
     }
 
     return InboxFetchResult(
@@ -305,18 +537,21 @@ class LocalSyncRunner {
     if (decoded is! Map) {
       throw const LocalSyncException('通知详情返回格式不正确');
     }
-    if (decoded['status'] != true) {
+    if (!_hasSuccessfulApiStatus(decoded)) {
       throw const LocalSyncException('通知详情接口返回失败');
     }
-    final detail = decoded['msg'] is Map ? decoded['msg'] as Map : {};
-    final content = _stripHtml(
-      _stringOrEmpty(detail['content']).isNotEmpty
-          ? _stringOrEmpty(detail['content'])
-          : _stringOrEmpty(detail['rtf_content']),
+    final detail = _extractNoticeDetail(decoded);
+    final rawContent = _stringOrEmpty(_mapValue(detail, 'content'));
+    final rawRtf = _stringOrEmpty(
+      _mapValue(detail, 'rtf_content') ?? _mapValue(detail, 'rtfContent'),
     );
-    final rtf = _stringOrEmpty(detail['rtf_content']);
+    final content = _stripHtml(rawContent.isNotEmpty ? rawContent : rawRtf);
+    final rtf = rawRtf;
     final decodedAttachments = _decodeIframeNames(rtf);
-    final links = extractNoticeLinks('$rtf\n${jsonEncode(decodedAttachments)}');
+    final links = extractNoticeLinks(
+      '$rtf\n${_collectStringValues(decodedAttachments).join('\n')}\n'
+      '${_collectStringValues(decoded).join('\n')}',
+    );
 
     return DetailSummary(
       title: message.title,
@@ -330,6 +565,7 @@ class LocalSyncRunner {
     required String entryUrl,
     required DetailSummary summary,
     required String cookie,
+    String source = 'inbox',
   }) async {
     final entryUri = Uri.parse(entryUrl);
     _ensureTrustedCookieTarget(entryUri);
@@ -351,7 +587,289 @@ class LocalSyncRunner {
       sourceTitle: summary.title,
       sourceSendTime: summary.sendTime,
       sourceContent: summary.content,
+      source: source,
     );
+  }
+
+  Future<_CourseSourceStats> _appendCourseSourceItems({
+    required String cookie,
+    required int courseLimit,
+    required int itemLimit,
+    required List<SyncItem> items,
+    required List<AppSyncFailure> failures,
+    SyncProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(const SyncProgress(phase: SyncPhase.courses));
+    List<CourseSpace> courses;
+    var courseCookie = cookie;
+    try {
+      final discovery = await _fetchCourseDiscovery(cookie);
+      courses = discovery.courses;
+      courseCookie = discovery.cookie;
+    } catch (error) {
+      failures.add(
+        AppSyncFailure(
+          entryUrl: _modernCourseListUrl,
+          sourceTitle: '课程空间',
+          message: error is LocalSyncException
+              ? redactSensitiveText(
+                  error.message,
+                  secrets: chaoxingCookieSecrets(cookie),
+                )
+              : '课程列表解析失败',
+        ),
+      );
+      return const _CourseSourceStats();
+    }
+
+    final normalizedCourseLimit = _normalizeLimit(courseLimit, 20, 100);
+    final normalizedItemLimit = _normalizeLimit(itemLimit, 60, 500);
+    final scannedCourses = courses.take(normalizedCourseLimit).length;
+    final coursesToScan = courses.take(normalizedCourseLimit).toList();
+    onProgress?.call(
+      SyncProgress(phase: SyncPhase.courses, total: scannedCourses),
+    );
+    final sourcePagesByCourse =
+        List<List<({String source, List<CourseTaskLink> links})>?>.filled(
+          scannedCourses,
+          null,
+        );
+    var completedCourseLists = 0;
+    await _forEachConcurrent(coursesToScan, _courseListConcurrency, (
+      course,
+      courseIndex,
+    ) async {
+      sourcePagesByCourse[courseIndex] = await Future.wait(
+        const ['course_work', 'course_exam'].map((source) async {
+          final listUrl = buildCourseTaskListUrl(course, source);
+          try {
+            final response = await _getWithCookie(
+              Uri.parse(listUrl),
+              headers: _htmlHeaders(courseCookie, _modernCourseListUrl),
+            );
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+              throw LocalSyncException('任务列表抓取失败 (${response.statusCode})');
+            }
+            return (
+              source: source,
+              links: parseCourseTaskLinks(
+                _decodeBody(response),
+                listUrl,
+                fallbackTitle: course.title,
+              ),
+            );
+          } catch (error) {
+            failures.add(
+              AppSyncFailure(
+                entryUrl: listUrl,
+                sourceTitle: course.title,
+                message: error is LocalSyncException
+                    ? redactSensitiveText(
+                        error.message,
+                        secrets: chaoxingCookieSecrets(cookie),
+                      )
+                    : '任务列表解析失败',
+              ),
+            );
+            return (source: source, links: const <CourseTaskLink>[]);
+          }
+        }),
+      );
+      completedCourseLists += 1;
+      onProgress?.call(
+        SyncProgress(
+          phase: SyncPhase.courses,
+          completed: completedCourseLists,
+          total: scannedCourses,
+        ),
+      );
+    });
+
+    var processedTasks = 0;
+    var discoveredTaskLinks = 0;
+    var statusFilteredTasks = 0;
+    final visitedUrls = <String>{};
+    final pendingDetails = <({String source, CourseTaskLink link})>[];
+    var limitReached = false;
+    for (
+      var courseIndex = 0;
+      courseIndex < sourcePagesByCourse.length;
+      courseIndex += 1
+    ) {
+      final sourcePages = sourcePagesByCourse[courseIndex] ?? const [];
+      for (final page in sourcePages) {
+        for (final link in page.links) {
+          if (processedTasks >= normalizedItemLimit) {
+            limitReached = true;
+            break;
+          }
+          if (!visitedUrls.add(link.url)) {
+            continue;
+          }
+          discoveredTaskLinks += 1;
+          if (!link.isActionable) {
+            statusFilteredTasks += 1;
+            continue;
+          }
+          processedTasks += 1;
+          pendingDetails.add((source: page.source, link: link));
+        }
+        if (limitReached) {
+          break;
+        }
+      }
+      if (limitReached) {
+        break;
+      }
+    }
+
+    final totalCourseUnits = scannedCourses + pendingDetails.length;
+    onProgress?.call(
+      SyncProgress(
+        phase: SyncPhase.courses,
+        completed: scannedCourses,
+        total: totalCourseUnits,
+      ),
+    );
+    var completedCourseDetails = 0;
+    await _forEachConcurrent(pendingDetails, _courseDetailConcurrency, (
+      pending,
+      _,
+    ) async {
+      final link = pending.link;
+      try {
+        final requirement = await fetchAssignmentRequirement(
+          entryUrl: link.url,
+          summary: DetailSummary(
+            title: link.title,
+            sendTime: null,
+            content: null,
+            assignmentLinks: const [],
+          ),
+          cookie: courseCookie,
+          source: pending.source,
+        );
+        if (isActionableWorkStatus(requirement.workStatus)) {
+          items.add(buildSyncItem(requirement, _clock()));
+        } else {
+          statusFilteredTasks += 1;
+        }
+      } catch (error) {
+        failures.add(
+          AppSyncFailure(
+            entryUrl: link.url,
+            sourceTitle: link.title,
+            message: error is LocalSyncException
+                ? redactSensitiveText(
+                    error.message,
+                    secrets: chaoxingCookieSecrets(cookie),
+                  )
+                : '任务详情解析失败',
+          ),
+        );
+      }
+      completedCourseDetails += 1;
+      onProgress?.call(
+        SyncProgress(
+          phase: SyncPhase.courses,
+          completed: scannedCourses + completedCourseDetails,
+          total: totalCourseUnits,
+        ),
+      );
+    });
+    if (pendingDetails.isEmpty) {
+      onProgress?.call(
+        SyncProgress(
+          phase: SyncPhase.courses,
+          completed: totalCourseUnits,
+          total: totalCourseUnits,
+        ),
+      );
+    }
+    return _CourseSourceStats(
+      courses: scannedCourses,
+      taskLinksDiscovered: discoveredTaskLinks,
+      taskLinks: processedTasks,
+      statusFiltered: statusFilteredTasks,
+    );
+  }
+
+  Future<List<CourseSpace>> fetchCourseSpaces(String cookie) async {
+    return (await _fetchCourseDiscovery(cookie)).courses;
+  }
+
+  Future<_CourseDiscoveryResult> _fetchCourseDiscovery(String cookie) async {
+    Object? modernError;
+    final session = _CookieSession(cookie);
+    try {
+      final homeResponse = await _getWithCookie(
+        Uri.parse(_homeUrl),
+        headers: _htmlHeaders(session.source, _homeUrl),
+        session: session,
+      );
+      final interactionUrl = findCourseInteractionUrl(
+        _decodeBody(homeResponse),
+      );
+      if (interactionUrl != null) {
+        await _getWithCookie(
+          Uri.parse(interactionUrl),
+          headers: _htmlHeaders(session.source, _homeUrl),
+          session: session,
+        );
+      }
+      final response = await _postFormWithCookie(
+        Uri.parse(_modernCourseListUrl),
+        headers: {
+          ..._htmlHeaders(
+            session.source,
+            interactionUrl ?? '$_modernCourseListOrigin/visit/interaction',
+          ),
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'Origin': _modernCourseListOrigin,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: const {
+          'courseType': '1',
+          'courseFolderId': '0',
+          'baseEducation': '0',
+          'superstarClass': '',
+          'courseFolderSize': '0',
+        },
+        session: session,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw LocalSyncException('新版课程列表抓取失败 (${response.statusCode})');
+      }
+      return _CourseDiscoveryResult(
+        courses: parseCourseSpaces(_decodeBody(response)),
+        cookie: session.source,
+      );
+    } catch (error) {
+      modernError = error;
+    }
+
+    try {
+      final response = await _getWithCookie(
+        Uri.parse(_courseListUrl),
+        headers: _jsonHeaders(session.source, _homeUrl),
+        session: session,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw LocalSyncException('旧版课程列表抓取失败 (${response.statusCode})');
+      }
+      return _CourseDiscoveryResult(
+        courses: parseCourseSpaces(_decodeBody(response)),
+        cookie: session.source,
+      );
+    } catch (legacyError) {
+      final modernMessage = modernError is LocalSyncException
+          ? modernError.message
+          : '新版课程列表不可用';
+      final legacyMessage = legacyError is LocalSyncException
+          ? legacyError.message
+          : '旧版课程列表不可用';
+      throw LocalSyncException('$modernMessage；$legacyMessage');
+    }
   }
 
   Future<String> _fetchPageText(
@@ -417,16 +935,24 @@ class LocalSyncRunner {
   Future<http.Response> _getWithCookie(
     Uri uri, {
     required Map<String, String> headers,
+    _CookieSession? session,
   }) {
-    return _sendWithCookie('GET', uri, headers: headers);
+    return _sendWithCookie('GET', uri, headers: headers, session: session);
   }
 
   Future<http.Response> _postFormWithCookie(
     Uri uri, {
     required Map<String, String> headers,
     required Map<String, String> body,
+    _CookieSession? session,
   }) {
-    return _sendWithCookie('POST', uri, headers: headers, bodyFields: body);
+    return _sendWithCookie(
+      'POST',
+      uri,
+      headers: headers,
+      bodyFields: body,
+      session: session,
+    );
   }
 
   Future<http.Response> _sendWithCookie(
@@ -434,22 +960,57 @@ class LocalSyncRunner {
     Uri uri, {
     required Map<String, String> headers,
     Map<String, String>? bodyFields,
+    _CookieSession? session,
   }) async {
     var current = uri;
     var currentMethod = method;
     var redirects = 0;
+    var cookieSource = session?.source ?? headers['Cookie'] ?? '';
+    final requestStopwatch = Stopwatch()..start();
+
+    Duration remainingTimeout() {
+      final remaining = requestTimeout - requestStopwatch.elapsed;
+      if (remaining <= Duration.zero) {
+        throw TimeoutException('request deadline exceeded');
+      }
+      return remaining;
+    }
 
     while (true) {
       _ensureTrustedCookieTarget(current);
       final request = http.Request(currentMethod, current)
         ..followRedirects = false
         ..headers.addAll(headers);
+      final scopedCookie = cookieHeaderForChaoxingUri(cookieSource, current);
+      if (scopedCookie.isEmpty) {
+        request.headers.remove('Cookie');
+      } else {
+        request.headers['Cookie'] = scopedCookie;
+      }
       if (bodyFields != null && currentMethod == 'POST') {
         request.bodyFields = bodyFields;
       }
 
-      final streamed = await _client.send(request);
-      final response = await http.Response.fromStream(streamed);
+      late final http.StreamedResponse streamed;
+      late final http.Response response;
+      try {
+        streamed = await _client.send(request).timeout(remainingTimeout());
+        response = await http.Response.fromStream(
+          streamed,
+        ).timeout(remainingTimeout());
+      } on TimeoutException {
+        throw LocalSyncException(
+          '请求 ${current.host} 超时（${requestTimeout.inSeconds} 秒），请检查网络后重试',
+        );
+      }
+      cookieSource = mergeChaoxingResponseCookies(
+        cookieSource,
+        current,
+        response.headers['set-cookie'],
+      );
+      if (session != null) {
+        session.source = cookieSource;
+      }
       if (!_isRedirect(response.statusCode)) {
         return response;
       }
@@ -476,21 +1037,8 @@ class LocalSyncRunner {
   }
 }
 
-bool isTrustedChaoxingUrl(String url) {
-  final uri = Uri.tryParse(url);
-  return uri != null && _isTrustedChaoxingUri(uri);
-}
-
-bool _isTrustedChaoxingUri(Uri uri) {
-  if (uri.scheme.toLowerCase() != 'https') {
-    return false;
-  }
-  final host = uri.host.toLowerCase();
-  return host == 'chaoxing.com' || host.endsWith('.chaoxing.com');
-}
-
 void _ensureTrustedCookieTarget(Uri uri) {
-  if (!_isTrustedChaoxingUri(uri)) {
+  if (!isTrustedChaoxingUri(uri)) {
     throw const LocalSyncException('已跳过非学习通域名请求');
   }
 }
@@ -550,6 +1098,21 @@ String? findInboxUrl(String html, String baseUrl) {
   return Uri.parse(_noticeOrigin).resolve(relative).toString();
 }
 
+String? findCourseInteractionUrl(String html) {
+  final matches = RegExp(
+    r'''\bdataurl=["']([^"']*\/visit\/interaction[^"']*)["']''',
+    caseSensitive: false,
+  ).allMatches(html);
+  for (final match in matches) {
+    final raw = _decodeBasicHtmlEntities(match.group(1)!);
+    final url = Uri.parse(_modernCourseListOrigin).resolve(raw).toString();
+    if (isTrustedChaoxingUrl(url)) {
+      return url;
+    }
+  }
+  return null;
+}
+
 bool isAssignmentOrExamRelated(InboxMessage message) {
   return RegExp(
     r'作业|考试|测验|测试|截止|结束提醒|答题|试卷|练习',
@@ -559,17 +1122,53 @@ bool isAssignmentOrExamRelated(InboxMessage message) {
 List<String> extractNoticeLinks(String text) {
   final seen = <String>{};
   final links = <String>[];
-  for (final match in RegExp(
-    r'''https?:\\?\/\\?\/[^"'\s<>)\[\]\\]+''',
-  ).allMatches(text)) {
-    final link = match.group(0)!.replaceAll(r'\/', '/');
-    if (RegExp(
-          r'(exam|work|homework|task|mooc1|course|clazz|classId|courseId|examOrWork)',
-          caseSensitive: false,
-        ).hasMatch(link) &&
-        seen.add(link)) {
+  final decoded = _decodeBasicHtmlEntities(
+    text,
+  ).replaceAll(r'\/', '/').replaceAll(r'\u0026', '&');
+
+  void addCandidate(String raw) {
+    var candidate = raw.trim();
+    if (candidate.startsWith('//')) {
+      candidate = 'https:$candidate';
+    }
+    final parsed = Uri.tryParse(candidate);
+    if (parsed == null) {
+      return;
+    }
+    final resolved = Uri.parse(_noticeOrigin).resolveUri(parsed);
+    if (!isTrustedChaoxingUri(resolved)) {
+      return;
+    }
+    final link = resolved.toString();
+    if (_isWorkOrExamLink(link) && seen.add(link)) {
       links.add(link);
     }
+  }
+
+  for (final match in RegExp(
+    r'''(?:https?:)?//[^"'\s<>)\[\]\\]+''',
+    caseSensitive: false,
+  ).allMatches(decoded)) {
+    addCandidate(match.group(0)!);
+  }
+
+  final fragment = html_parser.parseFragment(decoded);
+  for (final element in fragment.querySelectorAll(
+    '[href], [src], [data], [dataurl], [data-url]',
+  )) {
+    for (final name in const ['href', 'src', 'data', 'dataurl', 'data-url']) {
+      final value = element.attributes[name];
+      if (value != null) {
+        addCandidate(value);
+      }
+    }
+  }
+
+  for (final match in RegExp(
+    r'''["']((?:/|\.\.?/)[^"']*(?:work|exam)[^"']*)["']''',
+    caseSensitive: false,
+  ).allMatches(decoded)) {
+    addCandidate(match.group(1)!);
   }
   return links;
 }
@@ -588,6 +1187,281 @@ Map<String, DetailSummary> collectUniqueWorkLinks(
   return unique;
 }
 
+List<CourseSpace> parseCourseSpaces(String body) {
+  final htmlCourses = _parseCourseSpacesFromHtml(body);
+  if (htmlCourses.isNotEmpty) {
+    return htmlCourses;
+  }
+
+  Object? decoded;
+  try {
+    decoded = jsonDecode(body);
+  } catch (_) {
+    throw const LocalSyncException('课程列表返回格式不正确');
+  }
+
+  final courses = <String, CourseSpace>{};
+  void visit(Object? value, {String inheritedCpi = ''}) {
+    if (value is List) {
+      for (final child in value) {
+        visit(child, inheritedCpi: inheritedCpi);
+      }
+      return;
+    }
+    if (value is! Map) {
+      return;
+    }
+
+    final cpi = _firstMapText(value, const ['cpi', 'personId']) ?? inheritedCpi;
+    final title =
+        _firstMapText(value, const ['courseName', 'name', 'title']) ?? '';
+    final rawUrl = _firstMapText(value, const [
+      'courseSquareUrl',
+      'courseUrl',
+      'url',
+    ]);
+    final normalizedUrl = rawUrl == null
+        ? null
+        : _decodeBasicHtmlEntities(rawUrl).replaceAll(r'\/', '/');
+    final courseId =
+        (normalizedUrl == null
+            ? null
+            : _readUrlParamAny(normalizedUrl, const [
+                'courseId',
+                'courseid',
+              ])) ??
+        _firstMapText(value, const ['courseId', 'courseid']);
+    final classId =
+        (normalizedUrl == null
+            ? null
+            : _readUrlParamAny(normalizedUrl, const [
+                'classId',
+                'clazzId',
+                'clazzid',
+              ])) ??
+        _firstMapText(value, const ['classId', 'clazzId', 'clazzid', 'key']);
+    if (courseId != null && classId != null) {
+      final key = '$courseId:$classId';
+      courses[key] = CourseSpace(
+        courseId: courseId,
+        classId: classId,
+        cpi: cpi,
+        title: title.isEmpty ? '课程 $courseId' : title,
+      );
+    }
+
+    for (final child in value.values) {
+      visit(child, inheritedCpi: cpi);
+    }
+  }
+
+  visit(decoded);
+  if (courses.isEmpty) {
+    throw const LocalSyncException('课程列表中未找到可同步课程');
+  }
+  return courses.values.toList();
+}
+
+List<CourseSpace> _parseCourseSpacesFromHtml(String body) {
+  if (!body.contains('courseList') && !body.contains('courseid')) {
+    return const [];
+  }
+  final document = html_parser.parse(body);
+  final courses = <String, CourseSpace>{};
+  for (final item in document.querySelectorAll('#courseList > li.course')) {
+    final courseId = item.attributes['courseid']?.trim() ?? '';
+    final classId = item.attributes['clazzid']?.trim() ?? '';
+    final cpi = item.attributes['personid']?.trim() ?? '';
+    if (courseId.isEmpty || classId.isEmpty || cpi.isEmpty) {
+      continue;
+    }
+    final title = item.querySelector('.course-name')?.text.trim() ?? '';
+    courses['$courseId:$classId'] = CourseSpace(
+      courseId: courseId,
+      classId: classId,
+      cpi: cpi,
+      title: title.isEmpty ? '课程 $courseId' : title,
+    );
+  }
+  return courses.values.toList();
+}
+
+String buildCourseTaskListUrl(CourseSpace course, String source) {
+  final path = source == 'course_exam'
+      ? '/mooc-ans/exam/phone/task-list'
+      : '/work/task-list';
+  return Uri.parse('$_courseApiOrigin$path')
+      .replace(
+        queryParameters: {
+          'courseId': course.courseId,
+          'classId': course.classId,
+          'cpi': course.cpi,
+        },
+      )
+      .toString();
+}
+
+List<CourseTaskLink> parseCourseTaskLinks(
+  String html,
+  String baseUrl, {
+  required String fallbackTitle,
+}) {
+  final linksByUrl = <String, CourseTaskLink>{};
+  final document = html_parser.parse(html);
+  for (final element in document.querySelectorAll('[href], [data]')) {
+    final rawUrl = element.attributes['href'] ?? element.attributes['data'];
+    if (rawUrl == null) {
+      continue;
+    }
+    final url = _normalizeCourseTaskUrl(rawUrl, baseUrl);
+    if (url == null) {
+      continue;
+    }
+    String? selectedTitle;
+    for (final selector in const [
+      'p',
+      'dl dt',
+      '.course-name',
+      '.task-title',
+      '.title',
+    ]) {
+      final candidate = element.querySelector(selector)?.text.trim();
+      if (candidate != null && candidate.isNotEmpty) {
+        selectedTitle = candidate;
+        break;
+      }
+    }
+    final text = element.text.trim();
+    final status = _inferListedTaskStatus(element, text);
+    final candidate = CourseTaskLink(
+      url: url,
+      title: _normalizeWhitespace(
+        selectedTitle ?? (text.isEmpty ? fallbackTitle : text),
+      ),
+      status: status,
+    );
+    final previous = linksByUrl[url];
+    if (previous == null ||
+        (previous.status == 'unknown' && status != 'unknown')) {
+      linksByUrl[url] = candidate;
+    }
+  }
+
+  // Keep a tolerant fallback for malformed task-list markup.
+  final elementPattern = RegExp(
+    r'''<(?:a|div|li)\b[^>]*\b(?:href|data)=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:a|div|li)>''',
+    caseSensitive: false,
+  );
+  for (final match in elementPattern.allMatches(html)) {
+    final url = _normalizeCourseTaskUrl(match.group(1)!, baseUrl);
+    if (url == null) {
+      continue;
+    }
+    final title = _stripHtml(match.group(2)!);
+    linksByUrl.putIfAbsent(
+      url,
+      () => CourseTaskLink(
+        url: url,
+        title: title.isEmpty ? fallbackTitle : title,
+      ),
+    );
+  }
+
+  final attributePattern = RegExp(
+    r'''(?:href|data)=["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+  for (final match in attributePattern.allMatches(html)) {
+    final url = _normalizeCourseTaskUrl(match.group(1)!, baseUrl);
+    if (url != null) {
+      linksByUrl.putIfAbsent(
+        url,
+        () => CourseTaskLink(url: url, title: fallbackTitle),
+      );
+    }
+  }
+  return linksByUrl.values.toList();
+}
+
+String _inferListedTaskStatus(html_dom.Element element, String text) {
+  final normalized = _normalizeWhitespace(text);
+  final imageMarksExpired = element
+      .querySelectorAll('img')
+      .any(
+        (image) =>
+            (image.attributes['src'] ?? '').toLowerCase().contains('ks_02'),
+      );
+  if (imageMarksExpired || RegExp(r'已过期|已结束|不可作答').hasMatch(normalized)) {
+    return 'expired';
+  }
+  if (RegExp(r'待批阅|已提交').hasMatch(normalized)) {
+    return 'submitted';
+  }
+  if (RegExp(r'已完成|已批阅').hasMatch(normalized)) {
+    return 'completed';
+  }
+  return 'unknown';
+}
+
+String _normalizeWhitespace(String value) {
+  return value.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+String? _normalizeCourseTaskUrl(String rawUrl, String baseUrl) {
+  final decoded = _decodeBasicHtmlEntities(
+    rawUrl,
+  ).replaceAll(r'\/', '/').trim();
+  final parsed = Uri.tryParse(decoded);
+  if (parsed == null) {
+    return null;
+  }
+  final resolved = Uri.parse(baseUrl).resolveUri(parsed);
+  if (!isTrustedChaoxingUri(resolved)) {
+    return null;
+  }
+  final text = resolved.toString();
+  if (RegExp(r'\/task-list\b', caseSensitive: false).hasMatch(text)) {
+    return null;
+  }
+  final hasTaskId =
+      _readUrlParamAny(text, const ['taskrefId', 'workId', 'examId']) != null;
+  final hasTaskPath = RegExp(
+    r'\/(?:work|exam|exam-ans|mooc-ans)\b',
+    caseSensitive: false,
+  ).hasMatch(text);
+  return hasTaskId && hasTaskPath ? text : null;
+}
+
+String? _firstMapText(Map map, List<String> keys) {
+  for (final key in keys) {
+    for (final entry in map.entries) {
+      if (entry.key.toString().toLowerCase() == key.toLowerCase()) {
+        final text = _nullableString(entry.value);
+        if (text != null) {
+          return text;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+String? _readUrlParamAny(String url, List<String> keys) {
+  final uri = Uri.tryParse(url);
+  if (uri == null) {
+    return null;
+  }
+  for (final key in keys) {
+    for (final entry in uri.queryParameters.entries) {
+      if (entry.key.toLowerCase() == key.toLowerCase() &&
+          entry.value.isNotEmpty) {
+        return entry.value;
+      }
+    }
+  }
+  return null;
+}
+
 AssignmentRequirement parseAssignmentRequirement({
   required String html,
   required String entryUrl,
@@ -596,6 +1470,7 @@ AssignmentRequirement parseAssignmentRequirement({
   required String sourceTitle,
   required String? sourceSendTime,
   required String? sourceContent,
+  String source = 'inbox',
 }) {
   final pageTitle = extractPageTitle(html);
   final timeWindow = _extractTimeWindow(html, sourceContent);
@@ -610,17 +1485,23 @@ AssignmentRequirement parseAssignmentRequirement({
     courseId: _readUrlParam(finalUrl, 'courseId'),
     classId: _readUrlParam(finalUrl, 'classId'),
     workId:
-        _readUrlParam(finalUrl, 'workId') ?? _readHiddenValue(html, 'workId'),
+        _readUrlParam(finalUrl, 'workId') ??
+        _readHiddenValue(html, 'workId') ??
+        (source == 'course_work'
+            ? _readUrlParam(finalUrl, 'taskrefId') ??
+                  _readUrlParam(entryUrl, 'taskrefId')
+            : null),
     answerId:
         _readUrlParam(finalUrl, 'answerId') ??
         _readHiddenValue(html, 'answerId'),
-    workStatus: _inferWorkStatus(pageTitle, finalUrl),
+    workStatus: _inferWorkStatus(pageTitle, finalUrl, html),
     timeWindowStart: timeWindow.$1,
     timeWindowEnd: timeWindow.$2,
+    source: source,
   );
 }
 
-SyncItem? buildSyncItem(
+SyncItem buildSyncItem(
   AssignmentRequirement requirement,
   DateTime generatedAt,
 ) {
@@ -629,19 +1510,20 @@ SyncItem? buildSyncItem(
     requirement.sourceSendTime,
     generatedAt,
   );
-  if (dueAt == null) {
-    return null;
-  }
   final startAt = parseChaoxingDateTime(
     requirement.timeWindowStart,
     requirement.sourceSendTime,
     generatedAt,
   );
   final kind = _inferKind(requirement);
+  final examId =
+      _readUrlParam(requirement.finalUrl, 'examId') ??
+      _readUrlParam(requirement.finalUrl, 'taskrefId') ??
+      _readUrlParam(requirement.entryUrl, 'examId') ??
+      _readUrlParam(requirement.entryUrl, 'taskrefId');
   final stableId =
       requirement.workId ??
-      _readUrlParam(requirement.finalUrl, 'examId') ??
-      _readUrlParam(requirement.entryUrl, 'examId') ??
+      examId ??
       _hashString(
         requirement.finalUrl.isNotEmpty
             ? requirement.finalUrl
@@ -666,7 +1548,9 @@ SyncItem? buildSyncItem(
     courseId: requirement.courseId,
     classId: requirement.classId,
     workId: requirement.workId,
+    examId: kind == SyncItemKind.exam ? examId : null,
     answerId: requirement.answerId,
+    sources: [requirement.source],
   );
 }
 
@@ -741,6 +1625,160 @@ Map<String, String> _jsonHeaders(String cookie, String referer) {
 
 String _decodeBody(http.Response response) {
   return utf8.decode(response.bodyBytes);
+}
+
+class _NoticePage {
+  const _NoticePage({
+    required this.items,
+    required this.topNotices,
+    required this.urgentNotices,
+    required this.lastGetId,
+    required this.lastPage,
+  });
+
+  final List<Object?> items;
+  final List<Object?> topNotices;
+  final List<Object?> urgentNotices;
+  final String lastGetId;
+  final bool lastPage;
+}
+
+_NoticePage _extractNoticePage(Map data) {
+  final containers = <Map>[data];
+  var cursor = 0;
+  while (cursor < containers.length && containers.length < 12) {
+    final current = containers[cursor++];
+    for (final key in const ['notices', 'data', 'result', 'page', 'payload']) {
+      final child = _mapValue(current, key);
+      if (child is Map && !containers.contains(child)) {
+        containers.add(child);
+      }
+    }
+  }
+
+  List<Object?> readFirstList(List<String> keys) {
+    for (final container in containers) {
+      for (final key in keys) {
+        final value = _mapValue(container, key);
+        if (value is List) {
+          return value;
+        }
+      }
+    }
+    return const [];
+  }
+
+  final directData = _mapValue(data, 'data');
+  final items = directData is List
+      ? directData
+      : readFirstList(const ['list', 'rows', 'records', 'items', 'notices']);
+
+  String firstText(List<String> keys) {
+    for (final container in containers) {
+      for (final key in keys) {
+        final value = _nullableString(_mapValue(container, key));
+        if (value != null) {
+          return value;
+        }
+      }
+    }
+    return '';
+  }
+
+  bool firstTruthy(List<String> keys) {
+    for (final container in containers) {
+      for (final key in keys) {
+        final value = _mapValue(container, key);
+        if (value != null && _isTruthy(value)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  return _NoticePage(
+    items: items,
+    topNotices: readFirstList(const ['topNotices', 'topList']),
+    urgentNotices: readFirstList(const ['urgentNotices', 'urgentList']),
+    lastGetId: firstText(const [
+      'lastGetId',
+      'lastId',
+      'nextId',
+      'nextValue',
+      'cursor',
+      'nextCursor',
+    ]),
+    lastPage: firstTruthy(const ['lastPage', 'isLastPage', 'finished']),
+  );
+}
+
+Map _extractNoticeDetail(Map decoded) {
+  final containers = <Map>[decoded];
+  var cursor = 0;
+  while (cursor < containers.length && containers.length < 12) {
+    final current = containers[cursor++];
+    if (_mapValue(current, 'content') != null ||
+        _mapValue(current, 'rtf_content') != null ||
+        _mapValue(current, 'rtfContent') != null) {
+      return current;
+    }
+    for (final key in const ['msg', 'data', 'detail', 'notice', 'result']) {
+      final child = _mapValue(current, key);
+      if (child is Map && !containers.contains(child)) {
+        containers.add(child);
+      }
+    }
+  }
+  return containers.length > 1 ? containers[1] : decoded;
+}
+
+Iterable<String> _collectStringValues(Object? value, [int depth = 0]) sync* {
+  if (depth > 8) {
+    return;
+  }
+  if (value is String) {
+    yield value;
+    return;
+  }
+  if (value is Map) {
+    for (final child in value.values) {
+      yield* _collectStringValues(child, depth + 1);
+    }
+    return;
+  }
+  if (value is List) {
+    for (final child in value) {
+      yield* _collectStringValues(child, depth + 1);
+    }
+  }
+}
+
+Object? _mapValue(Map map, String key) {
+  for (final entry in map.entries) {
+    if (entry.key.toString().toLowerCase() == key.toLowerCase()) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+bool _isTruthy(Object? value) {
+  if (value == true || value == 1) {
+    return true;
+  }
+  final text = _stringOrEmpty(value).trim().toLowerCase();
+  return text == 'true' || text == '1' || text == 'ok' || text == 'success';
+}
+
+bool _hasSuccessfulApiStatus(Map response) {
+  if (response.containsKey('status')) {
+    return _isTruthy(response['status']);
+  }
+  if (response.containsKey('success')) {
+    return _isTruthy(response['success']);
+  }
+  return false;
 }
 
 _InboxPageConfig _extractInboxPageConfig(String html) {
@@ -836,7 +1874,18 @@ bool _isWorkOrExamLink(String link) {
         r'workOrExam=(?:work|exam)',
         caseSensitive: false,
       ).hasMatch(link) ||
-      RegExp(r'\/(?:work|exam)\b', caseSensitive: false).hasMatch(link);
+      RegExp(
+        r'\/(?:work|exam|exam-ans|mooc-ans)\b',
+        caseSensitive: false,
+      ).hasMatch(link) ||
+      _readUrlParamAny(link, const [
+            'taskrefId',
+            'workId',
+            'examId',
+            'taskId',
+            'jobid',
+          ]) !=
+          null;
 }
 
 (String?, String?) _extractTimeWindow(String html, String? sourceContent) {
@@ -886,7 +1935,27 @@ bool _isWorkOrExamLink(String link) {
   return (null, null);
 }
 
-String _inferWorkStatus(String? pageTitle, String finalUrl) {
+bool isActionableWorkStatus(String status) {
+  return !const {
+    'completed',
+    'submitted',
+    'expired',
+    'view',
+    'preview',
+  }.contains(status.toLowerCase());
+}
+
+String _inferWorkStatus(String? pageTitle, String finalUrl, String html) {
+  final pageText = _stripHtml(html);
+  if (RegExp(r'已过期|已结束|不可作答').hasMatch(pageText)) {
+    return 'expired';
+  }
+  if (RegExp(r'待批阅|已提交').hasMatch(pageText)) {
+    return 'submitted';
+  }
+  if (RegExp(r'已完成|已批阅|查看答案').hasMatch(pageText)) {
+    return 'completed';
+  }
   if (finalUrl.contains('dowork') || pageTitle == '作业作答') {
     return 'answering';
   }
@@ -971,8 +2040,26 @@ int _normalizeLimit(int value, int fallback, int maximum) {
   return value > maximum ? maximum : value;
 }
 
-List<Object?> _readList(Object? value) {
-  return value is List ? value : const [];
+Future<void> _forEachConcurrent<T>(
+  List<T> values,
+  int concurrency,
+  Future<void> Function(T value, int index) action,
+) async {
+  if (values.isEmpty) {
+    return;
+  }
+  var nextIndex = 0;
+
+  Future<void> worker() async {
+    while (nextIndex < values.length) {
+      final index = nextIndex;
+      nextIndex += 1;
+      await action(values[index], index);
+    }
+  }
+
+  final workerCount = concurrency.clamp(1, values.length);
+  await Future.wait(List.generate(workerCount, (_) => worker()));
 }
 
 String _readString(Map map, String key, String fallback) {
@@ -1028,11 +2115,6 @@ String _normalizeChaoxingDateText(String value) {
         (match) => '${match.group(1)}-${match.group(2)}',
       )
       .replaceAll('/', '-');
-}
-
-String _redactSecret(String message, String secret) {
-  final trimmed = secret.trim();
-  return trimmed.isEmpty ? message : message.replaceAll(trimmed, '[已隐藏]');
 }
 
 class _InboxPageConfig {

@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../models/app_config.dart';
+import '../services/local_sync_runner.dart';
 
 typedef ConfigSaver = Future<void> Function(AppConfig config);
+typedef NotificationTester = Future<bool> Function();
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.initialConfig,
     required this.onSave,
+    this.onOpenLogin,
+    this.onTestNotification,
     super.key,
   });
 
   final AppConfig initialConfig;
   final ConfigSaver onSave;
+  final VoidCallback? onOpenLogin;
+  final NotificationTester? onTestNotification;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -22,9 +28,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _cookieController;
   late final TextEditingController _pageLimitController;
   late final TextEditingController _itemLimitController;
+  late final TextEditingController _courseLimitController;
   late double _refreshMinutes;
   late bool _remindersEnabled;
+  late bool _courseSourcesEnabled;
+  bool _clearSavedCookie = false;
   bool _saving = false;
+  bool _testingNotification = false;
 
   @override
   void initState() {
@@ -36,8 +46,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _itemLimitController = TextEditingController(
       text: widget.initialConfig.inboxItemLimit.toString(),
     );
+    _courseLimitController = TextEditingController(
+      text: widget.initialConfig.courseLimit.toString(),
+    );
     _refreshMinutes = widget.initialConfig.refreshMinutes.toDouble();
     _remindersEnabled = widget.initialConfig.remindersEnabled;
+    _courseSourcesEnabled = widget.initialConfig.courseSourcesEnabled;
   }
 
   @override
@@ -45,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _cookieController.dispose();
     _pageLimitController.dispose();
     _itemLimitController.dispose();
+    _courseLimitController.dispose();
     super.dispose();
   }
 
@@ -69,6 +84,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
           TextField(
             controller: _cookieController,
+            onChanged: (value) {
+              if (_clearSavedCookie && value.trim().isNotEmpty) {
+                setState(() => _clearSavedCookie = false);
+              }
+            },
             minLines: 3,
             maxLines: 5,
             decoration: const InputDecoration(
@@ -81,11 +101,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (widget.initialConfig.isConfigured) ...[
             const SizedBox(height: 8),
-            const ListTile(
+            ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.check_circle_outline),
-              title: Text('已保存 Cookie'),
-              subtitle: Text('不会在设置页回填完整 Cookie。'),
+              leading: Icon(
+                _clearSavedCookie
+                    ? Icons.delete_outline
+                    : Icons.check_circle_outline,
+              ),
+              title: Text(_clearSavedCookie ? '保存时将清除 Cookie' : '已保存 Cookie'),
+              subtitle: const Text('不会在设置页回填完整 Cookie。'),
+              trailing: TextButton(
+                onPressed: () {
+                  _cookieController.clear();
+                  setState(() => _clearSavedCookie = !_clearSavedCookie);
+                },
+                child: Text(_clearSavedCookie ? '撤销' : '清除'),
+              ),
+            ),
+          ],
+          if (widget.onOpenLogin != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: widget.onOpenLogin,
+              icon: const Icon(Icons.login),
+              label: const Text('在 App 内重新登录'),
             ),
           ],
           const SizedBox(height: 14),
@@ -119,12 +158,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 14),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.school_outlined),
+            title: const Text('课程空间补充同步'),
+            subtitle: const Text('从课程空间补抓作业和考试，减少仅依赖收件箱造成的漏项。接口变化时可能出现部分失败。'),
+            value: _courseSourcesEnabled,
+            onChanged: (value) => setState(() => _courseSourcesEnabled = value),
+          ),
+          if (_courseSourcesEnabled) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _courseLimitController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '最多扫描课程数',
+                prefixIcon: Icon(Icons.format_list_numbered),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
             secondary: const Icon(Icons.notifications_active_outlined),
-            title: const Text('提醒去重'),
-            subtitle: const Text('记录已提醒项目；Windows 系统通知仍待接入。'),
+            title: const Text('Windows 截止提醒'),
+            subtitle: const Text('在截止前 72 小时内发送一次系统通知，并记录去重历史。'),
             value: _remindersEnabled,
             onChanged: (value) => setState(() => _remindersEnabled = value),
           ),
+          if (widget.onTestNotification != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _testingNotification
+                  ? null
+                  : () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      setState(() => _testingNotification = true);
+                      try {
+                        final delivered = await widget.onTestNotification!();
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                delivered
+                                    ? '测试通知已发送；点击通知应恢复主窗口'
+                                    : '当前平台或通知服务不可用',
+                              ),
+                            ),
+                          );
+                        }
+                      } catch (_) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('测试通知发送失败，请检查 Windows 通知设置'),
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _testingNotification = false);
+                        }
+                      }
+                    },
+              icon: const Icon(Icons.notification_add_outlined),
+              label: Text(_testingNotification ? '发送中' : '发送测试通知'),
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
             '自动刷新间隔：${_refreshMinutes.round()} 分钟',
@@ -145,9 +244,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : () async {
                     final messenger = ScaffoldMessenger.of(context);
                     setState(() => _saving = true);
-                    final nextCookie = _cookieController.text.trim().isEmpty
-                        ? widget.initialConfig.cookie
-                        : _cookieController.text;
+                    final enteredCookie = _cookieController.text.trim();
+                    final nextCookie = enteredCookie.isNotEmpty
+                        ? enteredCookie
+                        : _clearSavedCookie
+                        ? ''
+                        : widget.initialConfig.cookie;
                     try {
                       await widget.onSave(
                         AppConfig(
@@ -155,19 +257,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           inboxPageLimit: _readPositiveInt(
                             _pageLimitController.text,
                             3,
+                            maximum: 20,
                           ),
                           inboxItemLimit: _readPositiveInt(
                             _itemLimitController.text,
                             60,
+                            maximum: 500,
                           ),
                           refreshMinutes: _refreshMinutes.round(),
                           remindersEnabled: _remindersEnabled,
+                          courseSourcesEnabled: _courseSourcesEnabled,
+                          courseLimit: _readPositiveInt(
+                            _courseLimitController.text,
+                            20,
+                            maximum: 100,
+                          ),
                         ),
                       );
                       _cookieController.clear();
                       if (mounted) {
                         messenger.showSnackBar(
                           const SnackBar(content: Text('设置已保存')),
+                        );
+                      }
+                    } catch (error) {
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              error is LocalSyncException
+                                  ? error.message
+                                  : '设置保存失败，请稍后重试',
+                            ),
+                          ),
                         );
                       }
                     } finally {
@@ -185,10 +307,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-int _readPositiveInt(String value, int fallback) {
+int _readPositiveInt(String value, int fallback, {required int maximum}) {
   final parsed = int.tryParse(value.trim());
   if (parsed == null || parsed < 1) {
     return fallback;
   }
-  return parsed;
+  return parsed > maximum ? maximum : parsed;
 }

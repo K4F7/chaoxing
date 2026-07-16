@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/sync_item.dart';
+import '../services/chaoxing_url_policy.dart';
 import '../widgets/status_pill.dart';
 
 class DetailScreen extends StatelessWidget {
@@ -13,6 +14,7 @@ class DetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final kindLabel = item.isExam ? '考试' : '作业';
+    final trustedUrl = isTrustedChaoxingUrl(item.url);
     return Scaffold(
       appBar: AppBar(title: Text(kindLabel)),
       body: ListView(
@@ -63,18 +65,30 @@ class DetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: item.url.isEmpty
-                ? null
-                : () => launchUrl(
-                    Uri.parse(item.url),
-                    mode: LaunchMode.externalApplication,
-                  ),
+            onPressed: trustedUrl ? () => _openTrustedUrl(context) : null,
             icon: const Icon(Icons.open_in_new),
-            label: const Text('打开学习通链接'),
+            label: Text(trustedUrl ? '打开学习通链接' : '学习通链接不可用'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _openTrustedUrl(BuildContext context) async {
+    var opened = false;
+    try {
+      opened = await launchUrl(
+        Uri.parse(item.url),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('无法打开学习通链接')));
+    }
   }
 }
 

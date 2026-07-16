@@ -12,9 +12,13 @@ abstract class AppStorage {
 
   Future<void> saveConfig(AppConfig config);
 
+  Future<void> clearCookie();
+
   Future<AppSyncResponse?> loadCachedSync();
 
   Future<void> saveCachedSync(AppSyncResponse response);
+
+  Future<void> clearCachedSync();
 
   Future<ReminderHistory> loadReminderHistory();
 
@@ -35,6 +39,10 @@ class DeviceAppStorage implements AppStorage {
   static const _inboxItemLimitKey = 'inbox_item_limit';
   static const _refreshMinutesKey = 'refresh_minutes';
   static const _remindersEnabledKey = 'reminders_enabled';
+  static const _courseSourcesEnabledKey = 'course_sources_enabled';
+  static const _courseSourcesDefaultMigrationKey =
+      'course_sources_default_enabled_v2';
+  static const _courseLimitKey = 'course_limit';
   static const _cachedSyncKey = 'cached_app_sync';
   static const _reminderHistoryKey = 'reminder_history';
 
@@ -49,28 +57,50 @@ class DeviceAppStorage implements AppStorage {
     final legacyBaseUrl =
         await _secureStorage.read(key: _legacyBaseUrlKey) ?? '';
     final legacyToken = await _secureStorage.read(key: _legacyTokenKey) ?? '';
+    var courseSourcesEnabled = prefs.getBool(_courseSourcesEnabledKey) ?? true;
+    final courseDefaultMigrated =
+        prefs.getBool(_courseSourcesDefaultMigrationKey) ?? false;
+    if (cookie.trim().isNotEmpty && !courseDefaultMigrated) {
+      courseSourcesEnabled = true;
+      await prefs.setBool(_courseSourcesEnabledKey, true);
+      await prefs.setBool(_courseSourcesDefaultMigrationKey, true);
+    }
     return AppConfig(
       cookie: cookie,
       inboxPageLimit: prefs.getInt(_inboxPageLimitKey) ?? 3,
       inboxItemLimit: prefs.getInt(_inboxItemLimitKey) ?? 60,
       refreshMinutes: prefs.getInt(_refreshMinutesKey) ?? 60,
       remindersEnabled: prefs.getBool(_remindersEnabledKey) ?? true,
+      courseSourcesEnabled: courseSourcesEnabled,
+      courseLimit: prefs.getInt(_courseLimitKey) ?? 20,
       legacyWorkerConfigDetected:
           legacyBaseUrl.trim().isNotEmpty || legacyToken.trim().isNotEmpty,
-    );
+    ).normalized();
   }
 
   @override
   Future<void> saveConfig(AppConfig config) async {
+    config = config.normalized();
     final prefs = await _prefs();
-    await _secureStorage.write(key: _cookieKey, value: config.cookie.trim());
+    final cookie = config.cookie.trim();
+    if (cookie.isEmpty) {
+      await _secureStorage.delete(key: _cookieKey);
+    } else {
+      await _secureStorage.write(key: _cookieKey, value: cookie);
+    }
     await _secureStorage.delete(key: _legacyBaseUrlKey);
     await _secureStorage.delete(key: _legacyTokenKey);
     await prefs.setInt(_inboxPageLimitKey, config.inboxPageLimit);
     await prefs.setInt(_inboxItemLimitKey, config.inboxItemLimit);
     await prefs.setInt(_refreshMinutesKey, config.refreshMinutes);
     await prefs.setBool(_remindersEnabledKey, config.remindersEnabled);
+    await prefs.setBool(_courseSourcesEnabledKey, config.courseSourcesEnabled);
+    await prefs.setBool(_courseSourcesDefaultMigrationKey, true);
+    await prefs.setInt(_courseLimitKey, config.courseLimit);
   }
+
+  @override
+  Future<void> clearCookie() => _secureStorage.delete(key: _cookieKey);
 
   @override
   Future<AppSyncResponse?> loadCachedSync() async {
@@ -93,6 +123,7 @@ class DeviceAppStorage implements AppStorage {
         authStatus: cached.authStatus,
         items: cached.items,
         failures: cached.failures,
+        stats: cached.stats,
       );
     } catch (_) {
       await prefs.remove(_cachedSyncKey);
@@ -104,6 +135,12 @@ class DeviceAppStorage implements AppStorage {
   Future<void> saveCachedSync(AppSyncResponse response) async {
     final prefs = await _prefs();
     await prefs.setString(_cachedSyncKey, jsonEncode(response.toJson()));
+  }
+
+  @override
+  Future<void> clearCachedSync() async {
+    final prefs = await _prefs();
+    await prefs.remove(_cachedSyncKey);
   }
 
   @override
@@ -159,11 +196,21 @@ class MemoryAppStorage implements AppStorage {
   }
 
   @override
+  Future<void> clearCookie() async {
+    config = config.copyWith(cookie: '');
+  }
+
+  @override
   Future<AppSyncResponse?> loadCachedSync() async => cachedSync;
 
   @override
   Future<void> saveCachedSync(AppSyncResponse response) async {
     cachedSync = response;
+  }
+
+  @override
+  Future<void> clearCachedSync() async {
+    cachedSync = null;
   }
 
   @override

@@ -29,10 +29,15 @@ void main() {
           inboxItemLimit: 60,
           refreshMinutes: 60,
           remindersEnabled: true,
+          courseSourcesEnabled: true,
+          courseLimit: 12,
         ),
       );
 
-      expect((await storage.loadConfig()).cookie, 'UID=real; vc=secret');
+      final loaded = await storage.loadConfig();
+      expect(loaded.cookie, 'UID=real; vc=secret');
+      expect(loaded.courseSourcesEnabled, isTrue);
+      expect(loaded.courseLimit, 12);
       final prefs = SharedPreferencesAsync();
       final preferenceDump = (await prefs.getAll()).entries
           .map((entry) => '${entry.key}=${entry.value}')
@@ -53,6 +58,110 @@ void main() {
 
     final prefs = SharedPreferencesAsync();
     expect(await prefs.getString('cached_app_sync'), isNull);
+  });
+
+  test('enables course sources when no preference was stored yet', () async {
+    final storage = DeviceAppStorage();
+
+    final loaded = await storage.loadConfig();
+
+    expect(loaded.courseSourcesEnabled, isTrue);
+  });
+
+  test(
+    'normalizes unsafe persisted request limits and refresh intervals',
+    () async {
+      SharedPreferencesAsyncPlatform.instance =
+          InMemorySharedPreferencesAsync.withData({
+            'inbox_page_limit': -10,
+            'inbox_item_limit': 999999,
+            'refresh_minutes': 1,
+            'course_limit': 0,
+          });
+      final storage = DeviceAppStorage();
+
+      final loaded = await storage.loadConfig();
+
+      expect(loaded.inboxPageLimit, 3);
+      expect(loaded.inboxItemLimit, 500);
+      expect(loaded.refreshMinutes, 15);
+      expect(loaded.courseLimit, 20);
+    },
+  );
+
+  test('normalizes config before persisting it', () async {
+    final storage = DeviceAppStorage();
+
+    await storage.saveConfig(
+      const AppConfig(
+        cookie: '  UID=1  ',
+        inboxPageLimit: 100,
+        inboxItemLimit: -1,
+        refreshMinutes: 999,
+        remindersEnabled: true,
+        courseLimit: 1000,
+      ),
+    );
+    final loaded = await storage.loadConfig();
+
+    expect(loaded.cookie, 'UID=1');
+    expect(loaded.inboxPageLimit, 20);
+    expect(loaded.inboxItemLimit, 60);
+    expect(loaded.refreshMinutes, 180);
+    expect(loaded.courseLimit, 100);
+  });
+
+  test(
+    'migrates an existing configured account to the new course default',
+    () async {
+      SharedPreferencesAsyncPlatform.instance =
+          InMemorySharedPreferencesAsync.withData({
+            'course_sources_enabled': false,
+          });
+      FlutterSecureStorage.setMockInitialValues({'chaoxing_cookie': 'UID=old'});
+      final storage = DeviceAppStorage();
+
+      final migrated = await storage.loadConfig();
+      expect(migrated.courseSourcesEnabled, isTrue);
+
+      await storage.saveConfig(migrated.copyWith(courseSourcesEnabled: false));
+      expect((await storage.loadConfig()).courseSourcesEnabled, isFalse);
+    },
+  );
+
+  test('deletes the secure cookie when an empty config is saved', () async {
+    FlutterSecureStorage.setMockInitialValues({'chaoxing_cookie': 'UID=old'});
+    final storage = DeviceAppStorage();
+
+    await storage.saveConfig(AppConfig.empty);
+
+    expect((await storage.loadConfig()).cookie, isEmpty);
+  });
+
+  test('clears only the secure cookie without changing preferences', () async {
+    final storage = DeviceAppStorage();
+    await storage.saveConfig(
+      const AppConfig(
+        cookie: 'UID=old',
+        inboxPageLimit: 7,
+        inboxItemLimit: 80,
+        refreshMinutes: 90,
+        remindersEnabled: false,
+        courseSourcesEnabled: false,
+        courseLimit: 30,
+      ),
+    );
+
+    await storage.clearCookie();
+    final loaded = await storage.loadConfig();
+
+    expect(loaded.cookie, isEmpty);
+    expect(loaded.inboxPageLimit, 7);
+    expect(loaded.inboxItemLimit, 80);
+    expect(loaded.refreshMinutes, 90);
+    expect(loaded.remindersEnabled, isFalse);
+    expect(loaded.courseSourcesEnabled, isFalse);
+    expect(loaded.courseLimit, 30);
   });
 
   test(

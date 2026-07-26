@@ -11,7 +11,11 @@ import '../services/local_sync_runner.dart';
 import '../services/reminder_service.dart';
 import '../utils/redaction.dart';
 
-typedef SyncFetcher = Future<AppSyncResponse> Function(AppConfig config);
+typedef SyncFetcher =
+    Future<AppSyncResponse> Function(
+      AppConfig config, {
+      AppSyncResponse? previous,
+    });
 typedef CookieAuthenticator = Future<AuthCheckResult> Function(String cookie);
 const _startupCacheFreshness = Duration(minutes: 5);
 const _manualRefreshCooldown = Duration(minutes: 1);
@@ -31,8 +35,12 @@ class AppController extends ChangeNotifier {
        super() {
     _fetcher =
         fetcher ??
-        (config) => _withLocalRunner(
-          (runner) => runner.run(config, onProgress: _handleSyncProgress),
+        (config, {previous}) => _withLocalRunner(
+          (runner) => runner.run(
+            config,
+            previous: previous,
+            onProgress: _handleSyncProgress,
+          ),
         );
     _authenticator =
         authenticator ??
@@ -306,7 +314,7 @@ class AppController extends ChangeNotifier {
         _notifyListeners();
 
         try {
-          final response = await _fetcher(config);
+          final response = await _fetcher(config, previous: _sync);
           final accepted = await _commitRefreshResponse(response, revision);
           if (accepted && revision == _configRevision) {
             await _processReminders(response, config);

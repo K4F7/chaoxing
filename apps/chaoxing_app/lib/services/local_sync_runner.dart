@@ -242,8 +242,14 @@ class LocalSyncRunner {
 
   void close() => _client.close();
 
+  /// Runs one full sync.
+  ///
+  /// [previous] is the result of the last successful sync for the same
+  /// account, or null on a first run or after the cache was cleared. It lets
+  /// later phases skip work whose answer cannot have changed.
   Future<AppSyncResponse> run(
     AppConfig config, {
+    AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
   }) async {
     final syncStopwatch = Stopwatch()..start();

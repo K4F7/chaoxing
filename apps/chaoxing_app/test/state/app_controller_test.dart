@@ -22,7 +22,7 @@ void main() {
       ),
       cachedSync: cached,
     );
-    final controller = AppController(storage, fetcher: (_) async => fresh);
+    final controller = AppController(storage, fetcher: (_, {previous}) async => fresh);
     addTearDown(controller.dispose);
 
     await controller.load();
@@ -44,7 +44,7 @@ void main() {
           courseLimit: 0,
         ),
       ),
-      fetcher: (config) async {
+      fetcher: (config, {previous}) async {
         fetchedConfig = config;
         return responseWithTitle('规范化加载结果');
       },
@@ -74,7 +74,7 @@ void main() {
     );
     final controller = AppController(
       storage,
-      fetcher: (_) async {
+      fetcher: (_, {previous}) async {
         fetches += 1;
         return responseWithTitle('不应同步');
       },
@@ -115,7 +115,7 @@ void main() {
           cachedSync: cached,
         ),
         clock: () => now,
-        fetcher: (_) async {
+        fetcher: (_, {previous}) async {
           fetches += 1;
           return responseWithTitle('不应立即同步');
         },
@@ -157,7 +157,7 @@ void main() {
         cachedSync: cached,
       ),
       clock: () => now,
-      fetcher: (_) async {
+      fetcher: (_, {previous}) async {
         fetches += 1;
         return responseWithTitle('退避结束后的结果');
       },
@@ -188,7 +188,7 @@ void main() {
         ),
         cachedSync: cached,
       ),
-      fetcher: (_) async => throw Exception('network down'),
+      fetcher: (_, {previous}) async => throw Exception('network down'),
     );
     addTearDown(controller.dispose);
 
@@ -201,7 +201,7 @@ void main() {
   test('recovers from local storage load failures', () async {
     final controller = AppController(
       _LoadFailingAppStorage(),
-      fetcher: (_) async => responseWithTitle('不应同步'),
+      fetcher: (_, {previous}) async => responseWithTitle('不应同步'),
     );
     addTearDown(controller.dispose);
 
@@ -218,7 +218,7 @@ void main() {
     var calls = 0;
     final controller = AppController(
       MemoryAppStorage(),
-      fetcher: (_) {
+      fetcher: (_, {previous}) {
         calls += 1;
         return completer.future;
       },
@@ -250,7 +250,7 @@ void main() {
     AppConfig? fetchedConfig;
     final controller = AppController(
       MemoryAppStorage(),
-      fetcher: (config) async {
+      fetcher: (config, {previous}) async {
         fetchedConfig = config;
         return responseWithTitle('规范化配置结果');
       },
@@ -282,7 +282,7 @@ void main() {
     final controller = AppController(
       MemoryAppStorage(),
       clock: () => now,
-      fetcher: (_) async {
+      fetcher: (_, {previous}) async {
         calls += 1;
         return responseWithTitle('最新作业');
       },
@@ -319,7 +319,7 @@ void main() {
     final controller = AppController(
       MemoryAppStorage(),
       clock: () => now,
-      fetcher: (_) async {
+      fetcher: (_, {previous}) async {
         calls += 1;
         return AppSyncResponse(
           lastSyncedAt: now,
@@ -368,7 +368,7 @@ void main() {
       final storage = MemoryAppStorage();
       final controller = AppController(
         storage,
-        fetcher: (config) {
+        fetcher: (config, {previous}) {
           final fetch = (config: config, result: Completer<AppSyncResponse>());
           fetches.add(fetch);
           return fetch.result.future;
@@ -446,7 +446,7 @@ void main() {
     final storage = MemoryAppStorage();
     final controller = AppController(
       storage,
-      fetcher: (config) async {
+      fetcher: (config, {previous}) async {
         if (config.cookie == 'UID=old') {
           return responseWithTitle('旧账号待办');
         }
@@ -501,7 +501,7 @@ void main() {
   test('redacts cookie from refresh errors', () async {
     final controller = AppController(
       MemoryAppStorage(),
-      fetcher: (_) async => throw Exception(
+      fetcher: (_, {previous}) async => throw Exception(
         'network failed Cookie: UID=1; vc=secret\n'
         'https://example.com?access_token=url-secret&account=student-42\n'
         'Authorization: Bearer bearer-secret',
@@ -539,7 +539,7 @@ void main() {
     );
     final controller = AppController(
       storage,
-      fetcher: (_) async {
+      fetcher: (_, {previous}) async {
         fetches += 1;
         return responseWithTitle('作业');
       },
@@ -559,7 +559,7 @@ void main() {
     final completer = Completer<AppSyncResponse>();
     final controller = AppController(
       MemoryAppStorage(),
-      fetcher: (_) => completer.future,
+      fetcher: (_, {previous}) => completer.future,
     );
 
     final saveFuture = controller.saveConfig(
@@ -615,7 +615,7 @@ void main() {
       );
       final controller = AppController(
         storage,
-        fetcher: (_) async => responseWithTitle('作业'),
+        fetcher: (_, {previous}) async => responseWithTitle('作业'),
       );
       addTearDown(controller.dispose);
       await controller.load();
@@ -634,7 +634,7 @@ void main() {
     final storage = MemoryAppStorage();
     final controller = AppController(
       storage,
-      fetcher: (_) => syncCompleter.future,
+      fetcher: (_, {previous}) => syncCompleter.future,
       authenticator: (_) async => const AuthCheckResult(
         authenticated: true,
         statusCode: 200,
@@ -663,7 +663,7 @@ void main() {
     final storage = MemoryAppStorage();
     final controller = AppController(
       storage,
-      fetcher: (_) async => responseWithTitle('不应同步'),
+      fetcher: (_, {previous}) async => responseWithTitle('不应同步'),
       authenticator: (_) async => const AuthCheckResult(
         authenticated: false,
         statusCode: 200,
@@ -733,6 +733,7 @@ class _CloseTrackingRunner extends LocalSyncRunner {
   @override
   Future<AppSyncResponse> run(
     AppConfig config, {
+    AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
   }) => _result.future;
 
@@ -754,6 +755,7 @@ class _ImmediateRunner extends LocalSyncRunner {
   @override
   Future<AppSyncResponse> run(
     AppConfig config, {
+    AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
   }) async => response;
 

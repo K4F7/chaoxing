@@ -55,7 +55,7 @@ void main() {
           remindersEnabled: true,
         ),
       ),
-      fetcher: (_) async => AppSyncResponse(
+      fetcher: (_, {previous}) async => AppSyncResponse(
         lastSyncedAt: DateTime(2026, 6, 5, 8),
         authStatus: 'ok',
         failures: const [],
@@ -95,7 +95,7 @@ void main() {
           remindersEnabled: true,
         ),
       ),
-      fetcher: (_) async => AppSyncResponse(
+      fetcher: (_, {previous}) async => AppSyncResponse(
         lastSyncedAt: DateTime(2026, 7, 16, 8),
         authStatus: 'ok',
         items: const [],
@@ -137,7 +137,7 @@ void main() {
           remindersEnabled: true,
         ),
       ),
-      fetcher: (_) => completer.future,
+      fetcher: (_, {previous}) => completer.future,
     );
     addTearDown(controller.dispose);
 
@@ -169,7 +169,7 @@ void main() {
           remindersEnabled: true,
         ),
       ),
-      fetcher: (_) async => AppSyncResponse(
+      fetcher: (_, {previous}) async => AppSyncResponse(
         lastSyncedAt: DateTime(2026, 7, 16, 8),
         authStatus: 'ok',
         failures: const [],

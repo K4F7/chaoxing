@@ -10,6 +10,8 @@ typedef NotificationTester = Future<bool> Function(bool showDetails);
 typedef VersionLabelLoader = Future<String> Function();
 typedef CourseMonitoringChanged =
     Future<void> Function(String courseKey, bool monitored);
+typedef AutostartEnabledLoader = Future<bool> Function();
+typedef AutostartChanged = Future<void> Function(bool enabled);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -20,6 +22,8 @@ class SettingsScreen extends StatefulWidget {
     this.courseCatalog = CourseCatalog.empty,
     this.onCourseMonitoringChanged,
     this.onRefreshCourses,
+    this.autostartEnabledLoader,
+    this.onAutostartChanged,
     this.versionLabelLoader = _loadVersionLabel,
     super.key,
   });
@@ -31,6 +35,8 @@ class SettingsScreen extends StatefulWidget {
   final CourseCatalog courseCatalog;
   final CourseMonitoringChanged? onCourseMonitoringChanged;
   final Future<void> Function()? onRefreshCourses;
+  final AutostartEnabledLoader? autostartEnabledLoader;
+  final AutostartChanged? onAutostartChanged;
   final VersionLabelLoader versionLabelLoader;
 
   @override
@@ -52,6 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _saving = false;
   bool _testingNotification = false;
   bool _refreshingCourses = false;
+  bool? _autostartEnabled;
+  bool _changingAutostart = false;
 
   @override
   void initState() {
@@ -72,6 +80,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _courseSourcesEnabled = widget.initialConfig.courseSourcesEnabled;
     _courseCatalog = widget.courseCatalog;
     _versionLabel = widget.versionLabelLoader();
+    _loadAutostartState();
+  }
+
+  Future<void> _loadAutostartState() async {
+    final loader = widget.autostartEnabledLoader;
+    if (loader == null) {
+      return;
+    }
+    try {
+      final enabled = await loader();
+      if (mounted) {
+        setState(() => _autostartEnabled = enabled);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _autostartEnabled = false);
+      }
+    }
   }
 
   @override
@@ -343,6 +369,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             label: '${_refreshMinutes.round()} 分钟',
             onChanged: (value) => setState(() => _refreshMinutes = value),
           ),
+          const SizedBox(height: 12),
+          if (widget.autostartEnabledLoader != null &&
+              widget.onAutostartChanged != null)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.power_settings_new),
+              title: const Text('开机自启'),
+              subtitle: const Text('登录 Windows 后在后台启动，可从系统托盘打开。'),
+              value: _autostartEnabled ?? false,
+              onChanged: _autostartEnabled == null || _changingAutostart
+                  ? null
+                  : (value) async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      setState(() => _changingAutostart = true);
+                      try {
+                        await widget.onAutostartChanged!(value);
+                        if (mounted) {
+                          setState(() => _autostartEnabled = value);
+                        }
+                      } catch (_) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('开机自启设置失败')),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _changingAutostart = false);
+                        }
+                      }
+                    },
+            ),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: _saving

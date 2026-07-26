@@ -9,12 +9,14 @@ import 'screens/detail_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_login_screen.dart';
 import 'services/app_storage.dart';
+import 'services/autostart_service.dart';
 import 'services/reminder_service.dart';
 import 'services/tray_service.dart';
 import 'state/app_controller.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final hiddenLaunch = isHiddenLaunch(arguments);
 
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
@@ -86,7 +88,11 @@ Future<void> main() async {
   controller.addListener(() {
     unawaited(_updateTraySafely(trayService, _trayState(controller)));
   });
-  await windowManager.waitUntilReadyToShow(windowOptions, _showMainWindow);
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    if (!hiddenLaunch) {
+      await _showMainWindow();
+    }
+  });
 }
 
 class ChaoxingApp extends StatelessWidget {

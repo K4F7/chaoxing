@@ -88,6 +88,35 @@ void main() {
     expect(refreshes, 1);
   });
 
+  testWidgets('settings toggles Windows autostart from its actual state', (
+    tester,
+  ) async {
+    bool? requested;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          autostartEnabledLoader: () async => false,
+          onAutostartChanged: (enabled) async => requested = enabled,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final toggle = find.widgetWithText(SwitchListTile, '开机自启');
+    await tester.scrollUntilVisible(
+      toggle,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
+    expect(requested, isTrue);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+  });
+
   testWidgets('shows setup screen when no cookie config exists', (
     tester,
   ) async {

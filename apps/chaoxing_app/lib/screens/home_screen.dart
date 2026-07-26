@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../models/sync_item.dart';
+import '../services/autostart_service.dart';
 import '../services/local_diagnostics.dart';
 import '../state/app_controller.dart';
 import '../widgets/month_calendar.dart';
@@ -110,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openSettings(BuildContext context) {
+    final autostartService = AutostartService();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsScreen(
@@ -118,6 +120,12 @@ class _HomeScreenState extends State<HomeScreen> {
           courseCatalog: widget.controller.courseCatalog,
           onCourseMonitoringChanged: widget.controller.setCourseMonitored,
           onRefreshCourses: widget.controller.refreshCourses,
+          autostartEnabledLoader: Platform.isWindows
+              ? autostartService.isEnabled
+              : null,
+          onAutostartChanged: Platform.isWindows
+              ? autostartService.setEnabled
+              : null,
           onTestNotification: Platform.isWindows
               ? widget.controller.sendTestNotification
               : null,

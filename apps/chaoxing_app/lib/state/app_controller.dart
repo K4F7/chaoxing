@@ -22,6 +22,8 @@ const _startupCacheFreshness = Duration(minutes: 5);
 const _manualRefreshCooldown = Duration(minutes: 1);
 const _rateLimitBackoff = Duration(minutes: 5);
 
+enum AuthenticationState { unknown, valid, expired }
+
 class AppController extends ChangeNotifier {
   AppController(
     this._storage, {
@@ -79,6 +81,7 @@ class AppController extends ChangeNotifier {
   bool _refreshing = false;
   SyncProgress? _syncProgress;
   String? _error;
+  AuthenticationState _authenticationState = AuthenticationState.unknown;
 
   AppConfig get config => _config;
 
@@ -95,6 +98,8 @@ class AppController extends ChangeNotifier {
   SyncProgress? get syncProgress => _syncProgress;
 
   String? get error => _error;
+
+  AuthenticationState get authenticationState => _authenticationState;
 
   bool get isConfigured => _config.isConfigured;
 
@@ -196,6 +201,7 @@ class AppController extends ChangeNotifier {
       if (!auth.authenticated) {
         throw const LocalSyncException('登录态验证失败，请在登录成功后重试。');
       }
+      _authenticationState = AuthenticationState.valid;
     } catch (_) {
       _syncProgress = null;
       _notifyListeners();
@@ -288,6 +294,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> refresh({bool silent = false}) async {
+    if (_authenticationState == AuthenticationState.expired) {
+      if (!silent) {
+        _error = '登录已失效，请重新登录后再刷新';
+        _notifyListeners();
+      }
+      return;
+    }
     final inFlight = _refreshInFlight;
     if (inFlight != null) {
       if (_activeRefreshRevision != _configRevision) {
@@ -352,11 +365,15 @@ class AppController extends ChangeNotifier {
           final response = await _fetcher(config, previous: _sync);
           final accepted = await _commitRefreshResponse(response, revision);
           if (accepted && revision == _configRevision) {
+            _authenticationState = AuthenticationState.valid;
             await _processReminders(response, config);
           }
         } catch (error) {
           if (!_disposed && revision == _configRevision) {
             _error = _safeErrorMessage(error, config.cookie);
+            if (error is AuthenticationExpiredException) {
+              await _enterAuthenticationExpired();
+            }
           }
         }
 
@@ -454,6 +471,15 @@ class AppController extends ChangeNotifier {
     }
     _courseCatalog = catalog;
     _notifyListeners();
+  }
+
+  Future<void> _enterAuthenticationExpired() async {
+    if (_authenticationState == AuthenticationState.expired) {
+      return;
+    }
+    _authenticationState = AuthenticationState.expired;
+    _refreshTimer?.cancel();
+    await _reminderService.sendAuthenticationExpiredNotification();
   }
 
   void _applyConfig(AppConfig config, {bool scheduleRefresh = true}) {

@@ -173,10 +173,13 @@ TrayMenuState _trayState(AppController controller) {
             ? '已配置，同步时间未知'
             : '已配置，上次同步 ${_formatTrayTime(controller.sync!.lastSyncedAt!)}'
       : '未配置 Cookie';
+  final authenticationExpired =
+      controller.authenticationState == AuthenticationState.expired;
   return TrayMenuState(
     notificationsPaused: !controller.config.remindersEnabled,
     syncInProgress: controller.refreshing,
-    authSummary: summary,
+    authSummary: authenticationExpired ? '登录已失效' : summary,
+    authenticationExpired: authenticationExpired,
   );
 }
 

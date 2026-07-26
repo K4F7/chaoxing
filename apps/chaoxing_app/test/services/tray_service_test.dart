@@ -6,6 +6,18 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  test('tray state makes authentication expiry visible', () {
+    const state = TrayMenuState(
+      notificationsPaused: false,
+      syncInProgress: false,
+      authSummary: '登录已失效',
+      authenticationExpired: true,
+    );
+
+    expect(state.labels, contains('重新登录'));
+    expect(state.tooltip, startsWith('⚠'));
+  });
+
   test('tray menu state exposes required actions and current status', () {
     expect(
       const TrayMenuState(

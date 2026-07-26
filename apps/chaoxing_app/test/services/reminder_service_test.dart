@@ -89,6 +89,30 @@ void main() {
     expect(delivered, false);
   });
 
+  test('windows notifier renders authentication expiry distinctly', () async {
+    final backend = FakeNotificationBackend();
+    final notifier = WindowsReminderNotifier(backend: backend, enabled: true);
+
+    await notifier.show(
+      const ReminderCandidate(
+        key: 'authentication-expired',
+        showDetails: false,
+        item: SyncItem(
+          id: 'authentication-expired',
+          kind: SyncItemKind.assignment,
+          title: '登录已失效',
+          url: '',
+          sourceTitle: '',
+          status: 'authentication_expired',
+          displayStatus: SyncDisplayStatus.unscheduled,
+        ),
+      ),
+    );
+
+    expect(backend.lastRequest?.title, '学习通登录已失效');
+    expect(backend.lastRequest?.body, '请打开应用重新登录，自动同步已停止。');
+  });
+
   test(
     'windows notifier hides task details when privacy mode is enabled',
     () async {

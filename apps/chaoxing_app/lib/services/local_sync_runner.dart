@@ -38,6 +38,10 @@ class LocalSyncException implements Exception {
   String toString() => message;
 }
 
+class AuthenticationExpiredException extends LocalSyncException {
+  const AuthenticationExpiredException() : super('登录已失效，请重新登录后再同步');
+}
+
 class AuthCheckResult {
   const AuthCheckResult({
     required this.authenticated,
@@ -292,7 +296,7 @@ class LocalSyncRunner {
     final home = await _fetchHomePage(cookie);
     final auth = _evaluateAuth(home);
     if (!auth.authenticated) {
-      throw const LocalSyncException('Cookie 已失效或跳转到登录页，请重新登录后更新 Cookie');
+      throw const AuthenticationExpiredException();
     }
     onProgress?.call(
       const SyncProgress(

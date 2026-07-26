@@ -9,17 +9,22 @@ class TrayMenuState {
     required this.notificationsPaused,
     required this.syncInProgress,
     required this.authSummary,
+    this.authenticationExpired = false,
   });
 
   final bool notificationsPaused;
   final bool syncInProgress;
   final String authSummary;
+  final bool authenticationExpired;
+
+  String get tooltip =>
+      '${authenticationExpired ? '⚠ ' : ''}学习通待办 - $authSummary';
 
   List<String> get labels => [
     '打开窗口',
     syncInProgress ? '同步中' : '立即同步',
     notificationsPaused ? '恢复通知' : '暂停通知',
-    '查看登录状态',
+    authenticationExpired ? '重新登录' : '查看登录状态',
     '退出',
   ];
 }
@@ -68,13 +73,16 @@ class PluginTrayPlatformBridge implements TrayPlatformBridge {
             key: 'pause',
             label: state.notificationsPaused ? '恢复通知' : '暂停通知',
           ),
-          MenuItem(key: 'login', label: '查看登录状态'),
+          MenuItem(
+            key: 'login',
+            label: state.authenticationExpired ? '重新登录' : '查看登录状态',
+          ),
           MenuItem.separator(),
           MenuItem(key: 'exit', label: '退出'),
         ],
       ),
     );
-    await trayManager.setToolTip('学习通待办 - ${state.authSummary}');
+    await trayManager.setToolTip(state.tooltip);
   }
 
   @override

@@ -199,6 +199,49 @@ void main() {
     expect(find.text('同步诊断'), findsOneWidget);
   });
 
+  testWidgets('shows an authentication expiry banner with a login action', (
+    tester,
+  ) async {
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+        cachedSync: AppSyncResponse(
+          lastSyncedAt: DateTime(2026, 7, 27, 8),
+          authStatus: 'ok',
+          failures: const [],
+          items: [
+            SyncItem(
+              id: 'assignment-cached',
+              kind: SyncItemKind.assignment,
+              title: '缓存作业',
+              url: 'https://mooc1.chaoxing.com/work?workId=cached',
+              sourceTitle: '通知',
+              status: 'answering',
+              displayStatus: SyncDisplayStatus.unscheduled,
+            ),
+          ],
+        ),
+      ),
+      fetcher: (_, {previous}) async {
+        throw const AuthenticationExpiredException();
+      },
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(ChaoxingApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('登录已失效'), findsOneWidget);
+    expect(find.text('重新登录'), findsOneWidget);
+    expect(find.text('缓存作业'), findsOneWidget);
+  });
+
   testWidgets('shows the current stage while a sync is running', (
     tester,
   ) async {

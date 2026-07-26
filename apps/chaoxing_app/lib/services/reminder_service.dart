@@ -107,10 +107,17 @@ class WindowsReminderNotifier implements ReminderNotifier {
     }
 
     final item = candidate.item;
+    final authenticationExpired = item.status == 'authentication_expired';
     await _backend.show(
       DesktopNotificationRequest(
-        title: item.kind == SyncItemKind.exam ? '考试截止提醒' : '作业截止提醒',
-        body: candidate.showDetails
+        title: authenticationExpired
+            ? '学习通登录已失效'
+            : item.kind == SyncItemKind.exam
+            ? '考试截止提醒'
+            : '作业截止提醒',
+        body: authenticationExpired
+            ? '请打开应用重新登录，自动同步已停止。'
+            : candidate.showDetails
             ? '${item.sourceTitle}\n${item.title}\n截止：${_formatDueAt(item.dueAt)}'
             : '有一项学习任务即将截止。点击通知可在 App 内查看详情。',
         onClick: () => onNotificationClick?.call(item.id),
@@ -140,6 +147,24 @@ class LocalReminderService {
           status: 'test',
           displayStatus: SyncDisplayStatus.today,
           dueAt: sentAt,
+        ),
+      ),
+    );
+  }
+
+  Future<bool> sendAuthenticationExpiredNotification() {
+    return notifier.show(
+      const ReminderCandidate(
+        key: 'authentication-expired',
+        showDetails: false,
+        item: SyncItem(
+          id: 'authentication-expired',
+          kind: SyncItemKind.assignment,
+          title: '登录已失效，请重新登录',
+          url: '',
+          sourceTitle: '',
+          status: 'authentication_expired',
+          displayStatus: SyncDisplayStatus.unscheduled,
         ),
       ),
     );

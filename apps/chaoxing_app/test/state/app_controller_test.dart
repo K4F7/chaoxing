@@ -6,6 +6,7 @@ import 'package:chaoxing_app/models/course_catalog.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
 import 'package:chaoxing_app/services/local_sync_runner.dart';
+import 'package:chaoxing_app/services/reminder_service.dart';
 import 'package:chaoxing_app/state/app_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -100,6 +101,39 @@ void main() {
     await loading;
     expect(controller.items.single.title, '已解析作业');
   });
+
+  test(
+    'authentication expiry notifies once and blocks later refreshes',
+    () async {
+      var fetches = 0;
+      final notifier = _RecordingControllerNotifier();
+      final controller = AppController(
+        MemoryAppStorage(
+          config: const AppConfig(
+            cookie: 'UID=1',
+            inboxPageLimit: 1,
+            inboxItemLimit: 20,
+            refreshMinutes: 60,
+            remindersEnabled: true,
+          ),
+        ),
+        fetcher: (_, {previous}) async {
+          fetches += 1;
+          throw const AuthenticationExpiredException();
+        },
+        reminderService: LocalReminderService(notifier: notifier),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.load();
+      await controller.refresh();
+
+      expect(controller.authenticationState, AuthenticationState.expired);
+      expect(fetches, 1);
+      expect(notifier.candidates, hasLength(1));
+      expect(notifier.candidates.single.key, 'authentication-expired');
+    },
+  );
 
   test('loads cached sync before refreshing configured accounts', () async {
     final cached = responseWithTitle('缓存作业');
@@ -960,6 +994,16 @@ class _ProgressiveRunner extends LocalSyncRunner {
   }
 
   void finish(AppSyncResponse response) => _result.complete(response);
+}
+
+class _RecordingControllerNotifier implements ReminderNotifier {
+  final List<ReminderCandidate> candidates = [];
+
+  @override
+  Future<bool> show(ReminderCandidate candidate) async {
+    candidates.add(candidate);
+    return true;
+  }
 }
 
 class _LoadFailingAppStorage extends MemoryAppStorage {

@@ -75,12 +75,30 @@ class _HomeScreenState extends State<HomeScreen> {
       body: controller.loading
           ? const Center(child: CircularProgressIndicator())
           : controller.isConfigured
-          ? _Dashboard(
-              controller: controller,
-              tabIndex: _tabIndex,
-              onTabChanged: (value) => setState(() => _tabIndex = value),
-              onItemTap: (item) => _openDetail(context, item),
-              onOpenDiagnostics: () => _openDiagnostics(context),
+          ? Column(
+              children: [
+                if (controller.authenticationState ==
+                    AuthenticationState.expired)
+                  MaterialBanner(
+                    leading: const Icon(Icons.lock_clock_outlined),
+                    content: const Text('登录已失效'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => _openLogin(context),
+                        child: const Text('重新登录'),
+                      ),
+                    ],
+                  ),
+                Expanded(
+                  child: _Dashboard(
+                    controller: controller,
+                    tabIndex: _tabIndex,
+                    onTabChanged: (value) => setState(() => _tabIndex = value),
+                    onItemTap: (item) => _openDetail(context, item),
+                    onOpenDiagnostics: () => _openDiagnostics(context),
+                  ),
+                ),
+              ],
             )
           : _EmptySetup(
               onOpenLogin: Platform.isWindows

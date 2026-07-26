@@ -63,8 +63,10 @@ try {
   }
   Wait-Until { -not (Test-Path -LiteralPath $installDirectory) } `
     "Installation directory remains after uninstall."
-  $remaining = & reg.exe query $runKey /v $runValue 2>$null
-  if ($LASTEXITCODE -eq 0 -or $remaining) {
+  $runProperties = Get-ItemProperty -LiteralPath "Registry::$runKey" `
+    -ErrorAction SilentlyContinue
+  if ($null -ne $runProperties -and
+      $null -ne $runProperties.PSObject.Properties[$runValue]) {
     throw "Autostart value remains after uninstall."
   }
 

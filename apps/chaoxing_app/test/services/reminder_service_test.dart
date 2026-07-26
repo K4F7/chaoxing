@@ -3,6 +3,28 @@ import 'package:chaoxing_app/services/reminder_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('plans 24 hour low and 2 hour high reminder rules', () {
+    final now = DateTime(2026, 7, 27, 9);
+
+    final plans = planReminders(
+      items: [syncItem(dueAt: now.add(const Duration(hours: 25)), id: 'day')],
+      history: const ReminderHistory.empty(),
+      now: now,
+    );
+
+    expect(plans.map((plan) => plan.ruleId), ['due-24h', 'due-2h']);
+    expect(plans.map((plan) => plan.intensity), [
+      ReminderIntensity.low,
+      ReminderIntensity.high,
+    ]);
+    expect(plans.map((plan) => plan.triggerAt), [
+      now.add(const Duration(hours: 1)),
+      now.add(const Duration(hours: 23)),
+    ]);
+    expect(plans[0].key, contains('|due-24h|'));
+    expect(plans[1].key, contains('|due-2h|'));
+  });
+
   test('collects due-soon reminders once per item and due time', () {
     final now = DateTime.parse('2026-06-05T09:00:00+08:00');
     final item = syncItem(dueAt: now.add(const Duration(hours: 2)));
@@ -103,6 +125,36 @@ void main() {
     expect(history.contains(notifier.candidates.single.key), true);
   });
 
+  test(
+    'delivers both reminder rules without one suppressing the other',
+    () async {
+      final notifier = RecordingReminderNotifier(delivered: true);
+      final service = LocalReminderService(notifier: notifier);
+      final dueAt = DateTime(2026, 7, 28, 10);
+      final item = syncItem(dueAt: dueAt);
+
+      final afterLow = await service.process(
+        items: [item],
+        history: const ReminderHistory.empty(),
+        now: dueAt.subtract(const Duration(hours: 24)),
+      );
+      final afterHigh = await service.process(
+        items: [item],
+        history: afterLow,
+        now: dueAt.subtract(const Duration(hours: 2)),
+      );
+
+      expect(notifier.candidates.map((candidate) => candidate.intensity), [
+        ReminderIntensity.low,
+        ReminderIntensity.high,
+      ]);
+      expect(
+        afterHigh.sent.keys,
+        containsAll([contains('|due-24h|'), contains('|due-2h|')]),
+      );
+    },
+  );
+
   test('prunes stale, future, and excess reminder history entries', () {
     final now = DateTime(2026, 7, 16, 12);
     final history = ReminderHistory({
@@ -182,9 +234,9 @@ class RecordingReminderNotifier implements ReminderNotifier {
   }
 }
 
-SyncItem syncItem({required DateTime dueAt}) {
+SyncItem syncItem({required DateTime dueAt, String id = 'assignment-1'}) {
   return SyncItem(
-    id: 'assignment-1',
+    id: id,
     kind: SyncItemKind.assignment,
     title: '作业',
     url: 'https://example.com/work',

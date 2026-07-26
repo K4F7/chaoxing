@@ -4,80 +4,22 @@ import 'dart:io';
 import 'package:local_notifier/local_notifier.dart';
 
 import '../models/sync_item.dart';
+import 'reminder_rules.dart';
 
-class ReminderHistory {
-  const ReminderHistory(this.sent);
-
-  const ReminderHistory.empty() : sent = const {};
-
-  final Map<String, DateTime> sent;
-
-  bool contains(String key) => sent.containsKey(key);
-
-  ReminderHistory markSent(String key, DateTime sentAt) {
-    return ReminderHistory({...sent, key: sentAt});
-  }
-
-  ReminderHistory prune(
-    DateTime now, {
-    Duration retention = const Duration(days: 90),
-    int maximumEntries = 1000,
-  }) {
-    final oldest = now.subtract(retention);
-    final newest = now.add(const Duration(days: 1));
-    final entries =
-        sent.entries
-            .where(
-              (entry) =>
-                  !entry.value.isBefore(oldest) && !entry.value.isAfter(newest),
-            )
-            .toList()
-          ..sort((left, right) {
-            final timeOrder = right.value.compareTo(left.value);
-            return timeOrder != 0 ? timeOrder : left.key.compareTo(right.key);
-          });
-    return ReminderHistory(
-      Map.fromEntries(
-        entries.take(maximumEntries.clamp(0, entries.length).toInt()),
-      ),
-    );
-  }
-
-  factory ReminderHistory.fromJson(Map<String, dynamic> json) {
-    final raw = json['sent'];
-    if (raw is! Map) {
-      return const ReminderHistory.empty();
-    }
-
-    return ReminderHistory(
-      raw.map((key, value) {
-        return MapEntry(
-          key.toString(),
-          value is String
-              ? DateTime.tryParse(value)?.toLocal() ?? DateTime(1970)
-              : DateTime(1970),
-        );
-      }),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'sent': sent.map((key, value) => MapEntry(key, value.toIso8601String())),
-    };
-  }
-}
+export 'reminder_rules.dart';
 
 class ReminderCandidate {
   const ReminderCandidate({
     required this.key,
     required this.item,
     this.showDetails = true,
+    this.intensity = ReminderIntensity.high,
   });
 
   final String key;
   final SyncItem item;
   final bool showDetails;
+  final ReminderIntensity intensity;
 }
 
 abstract class ReminderNotifier {
@@ -208,10 +150,18 @@ class LocalReminderService {
     required ReminderHistory history,
     required DateTime now,
   }) {
-    return items
-        .where((item) => _shouldRemind(item, now))
-        .map((item) => ReminderCandidate(key: _reminderKey(item), item: item))
-        .where((candidate) => !history.contains(candidate.key))
+    return planReminders(items: items, history: history, now: now)
+        .where((plan) {
+          final age = now.difference(plan.triggerAt);
+          return !age.isNegative && age <= const Duration(hours: 1);
+        })
+        .map(
+          (plan) => ReminderCandidate(
+            key: plan.key,
+            item: plan.item,
+            intensity: plan.intensity,
+          ),
+        )
         .toList();
   }
 
@@ -232,6 +182,7 @@ class LocalReminderService {
           key: candidate.key,
           item: candidate.item,
           showDetails: showDetails,
+          intensity: candidate.intensity,
         ),
       );
       if (delivered) {
@@ -239,22 +190,6 @@ class LocalReminderService {
       }
     }
     return next;
-  }
-
-  bool _shouldRemind(SyncItem item, DateTime now) {
-    final dueAt = item.dueAt;
-    if (dueAt == null || dueAt.isBefore(now)) {
-      return false;
-    }
-    return dueAt.difference(now).inHours <= 72;
-  }
-
-  String _reminderKey(SyncItem item) {
-    return [
-      item.id,
-      item.kind.name,
-      item.dueAt?.toIso8601String() ?? 'unscheduled',
-    ].join('|');
   }
 }
 

@@ -189,6 +189,15 @@ void main() {
       lastSyncedAt: DateTime.parse('2026-06-08T23:30:00+08:00'),
       authStatus: 'ok',
       failures: const [],
+      seenNotices: const [
+        SeenNotice(
+          id: 'notice-1',
+          detailParsed: true,
+          sendTag: 7,
+          title: '作业通知',
+          taskLinks: ['https://mooc1.chaoxing.com/work?workId=1'],
+        ),
+      ],
       items: [
         cachedItem(
           id: 'tomorrow',
@@ -221,6 +230,9 @@ void main() {
     expect(restored?.items[0].dueInHours, 1);
     expect(restored?.items[1].displayStatus, SyncDisplayStatus.upcoming);
     expect(restored?.items[1].dueInHours, 11);
+    expect(restored?.seenNotices.single.id, 'notice-1');
+    expect(restored?.seenNotices.single.detailParsed, isTrue);
+    expect(restored?.seenNotices.single.sendTag, 7);
   });
 }
 

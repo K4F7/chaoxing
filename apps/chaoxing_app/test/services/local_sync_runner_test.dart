@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:chaoxing_app/models/app_config.dart';
+import 'package:chaoxing_app/models/app_sync_response.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/services/local_sync_runner.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -769,43 +770,46 @@ void main() {
       courseSourcesEnabled: false,
     );
 
-    test('skips detail requests for notices parsed by an earlier sync', () async {
-      final calls = <String>[];
-      var listed = ['notice-1'];
-      final runner = LocalSyncRunner(
-        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
-        client: noticeClient(listedNotices: () => listed, calls: calls),
-      );
+    test(
+      'skips detail requests for notices parsed by an earlier sync',
+      () async {
+        final calls = <String>[];
+        var listed = ['notice-1'];
+        final runner = LocalSyncRunner(
+          clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+          client: noticeClient(listedNotices: () => listed, calls: calls),
+        );
 
-      final first = await runner.run(config);
-      expect(
-        calls.where((call) => call.contains('notice-1/getNoticeDetail')),
-        hasLength(1),
-      );
+        final first = await runner.run(config);
+        expect(
+          calls.where((call) => call.contains('notice-1/getNoticeDetail')),
+          hasLength(1),
+        );
 
-      listed = ['notice-2', 'notice-1'];
-      calls.clear();
-      final second = await runner.run(config, previous: first);
+        listed = ['notice-2', 'notice-1'];
+        calls.clear();
+        final second = await runner.run(config, previous: first);
 
-      expect(
-        calls.where((call) => call.contains('notice-1/getNoticeDetail')),
-        isEmpty,
-      );
-      expect(
-        calls.where((call) => call.contains('notice-2/getNoticeDetail')),
-        hasLength(1),
-      );
-      expect(second.stats.detailSummaries, 2);
-      expect(second.failures, isEmpty);
-      expect(second.items.map((item) => item.id), [
-        'assignment-notice-1',
-        'assignment-notice-2',
-      ]);
-      expect(
-        calls.where((call) => call.contains('mooc1.chaoxing.com/work')),
-        hasLength(2),
-      );
-    });
+        expect(
+          calls.where((call) => call.contains('notice-1/getNoticeDetail')),
+          isEmpty,
+        );
+        expect(
+          calls.where((call) => call.contains('notice-2/getNoticeDetail')),
+          hasLength(1),
+        );
+        expect(second.stats.detailSummaries, 2);
+        expect(second.failures, isEmpty);
+        expect(second.items.map((item) => item.id), [
+          'assignment-notice-1',
+          'assignment-notice-2',
+        ]);
+        expect(
+          calls.where((call) => call.contains('mooc1.chaoxing.com/work')),
+          hasLength(2),
+        );
+      },
+    );
 
     test('reuse keeps a deadline that only the notice body carries', () async {
       final calls = <String>[];
@@ -862,6 +866,7 @@ void main() {
     MockClient pagingClient({
       required List<String> calls,
       required List<List<String>> Function() pages,
+      Set<String> Function()? failingDetails,
     }) {
       return MockClient((request) async {
         final url = request.url.toString();
@@ -895,7 +900,7 @@ void main() {
                         'id': id,
                         'title': '作业通知 $id',
                         'sendTime': '2026-06-01 08:00:00',
-                        'sendTag': 0,
+                        'sendTag': 7,
                       },
                 ],
                 'lastGetId': 'p${index + 1}',
@@ -910,6 +915,9 @@ void main() {
           r'/pc/notice/([^/]+)/getNoticeDetail',
         ).firstMatch(url);
         if (detail != null) {
+          if (failingDetails?.call().contains(detail.group(1)) == true) {
+            return http.Response('failed', 500);
+          }
           return http.Response(
             jsonEncode({
               'status': true,
@@ -949,7 +957,7 @@ void main() {
     Iterable<String> noticeListCalls(List<String> calls) =>
         calls.where((call) => call.endsWith('/getNoticeList'));
 
-    test('walks up to the page limit when nothing is known yet', () async {
+    test('walks up to the page limit when nothing was seen yet', () async {
       final calls = <String>[];
       final runner = LocalSyncRunner(
         clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
@@ -973,7 +981,7 @@ void main() {
       ]);
     });
 
-    test('stops paging on the page that repeats a known notice', () async {
+    test('stops paging on the page that repeats a seen notice', () async {
       final calls = <String>[];
       var pages = [
         ['n1'],
@@ -999,7 +1007,7 @@ void main() {
       expect(second.items.map((item) => item.id), contains('assignment-n4'));
     });
 
-    test('stops after the later page that repeats a known notice', () async {
+    test('stops after the later page that repeats a seen notice', () async {
       final calls = <String>[];
       var pages = [
         ['n1'],
@@ -1072,6 +1080,75 @@ void main() {
       expect(carried.sourceTitle, listed.sourceTitle);
       expect(carried.sourceSendTime, listed.sourceSendTime);
       expect(carried.sourceSendTime, isNotNull);
+    });
+
+    test('an early stop retries an unparsed seen notice', () async {
+      final calls = <String>[];
+      var pages = [
+        ['n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      var failingDetails = {'n2'};
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(
+          calls: calls,
+          pages: () => pages,
+          failingDetails: () => failingDetails,
+        ),
+      );
+
+      final first = await runner.run(config);
+      expect(first.failures, hasLength(1));
+      expect(
+        first.items.map((item) => item.id),
+        isNot(contains('assignment-n2')),
+      );
+
+      pages = [
+        ['n4', 'n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      failingDetails = {};
+      calls.clear();
+      final second = await runner.run(config, previous: first);
+
+      expect(noticeListCalls(calls), hasLength(1));
+      expect(
+        calls.where((call) => call.contains('n2/getNoticeDetail?sendTag=7')),
+        hasLength(1),
+      );
+      expect(second.failures, isEmpty);
+      expect(second.items.map((item) => item.id), contains('assignment-n2'));
+    });
+
+    test('a failed retry keeps the latest seen notice metadata', () async {
+      final calls = <String>[];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(
+          calls: calls,
+          pages: () => [
+            ['n2'],
+          ],
+          failingDetails: () => {'n2'},
+        ),
+      );
+      final previous = AppSyncResponse(
+        lastSyncedAt: DateTime.parse('2026-06-04T09:00:00+08:00'),
+        authStatus: 'ok',
+        items: const [],
+        failures: const [],
+        seenNotices: const [SeenNotice(id: 'n2', sendTag: 1, title: '旧标题')],
+      );
+
+      final response = await runner.run(config, previous: previous);
+
+      expect(response.failures, hasLength(1));
+      expect(response.seenNotices.single.sendTag, 7);
+      expect(response.seenNotices.single.title, '作业通知 n2');
     });
   });
 

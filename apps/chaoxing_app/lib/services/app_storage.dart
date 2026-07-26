@@ -131,6 +131,7 @@ class DeviceAppStorage implements AppStorage {
         items: cached.items,
         failures: cached.failures,
         stats: cached.stats,
+        seenNotices: cached.seenNotices,
       );
     } catch (_) {
       await prefs.remove(_cachedSyncKey);

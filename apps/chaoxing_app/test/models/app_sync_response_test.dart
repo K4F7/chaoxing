@@ -236,6 +236,7 @@ void main() {
         SeenNotice(
           id: 'notice-1',
           detailParsed: true,
+          sendTag: 7,
           title: '高等数学作业通知',
           sendTime: '2025-12-01 00:30:00',
           content: '结束时间：06-20 23:59',
@@ -252,6 +253,7 @@ void main() {
       'notice-2',
     ]);
     expect(restored.seenNotices.first.detailParsed, isTrue);
+    expect(restored.seenNotices.first.sendTag, 7);
     expect(restored.seenNotices.first.title, '高等数学作业通知');
     expect(restored.seenNotices.first.sendTime, '2025-12-01 00:30:00');
     expect(restored.seenNotices.first.content, '结束时间：06-20 23:59');
@@ -262,7 +264,7 @@ void main() {
     expect(restored.seenNotices.last.taskLinks, isEmpty);
   });
 
-  test('an older cache without seen notices restores as none known', () {
+  test('an older cache without seen notices restores with none seen', () {
     final restored = AppSyncResponse.fromJson({
       'lastSyncedAt': '2026-07-16T12:00:00.000',
       'authStatus': 'ok',
@@ -290,7 +292,10 @@ void main() {
     expect(response.seenNotices, hasLength(maxSeenNotices));
     expect(response.seenNotices.first.id, 'notice-0');
     expect(response.seenNotices.last.id, 'notice-${maxSeenNotices - 1}');
-    expect(response.seenNotices.map((notice) => notice.id), isNot(contains('')));
+    expect(
+      response.seenNotices.map((notice) => notice.id),
+      isNot(contains('')),
+    );
     expect(
       AppSyncResponse.fromJson(response.toJson()).seenNotices,
       hasLength(maxSeenNotices),

@@ -88,16 +88,12 @@ class SyncStats {
   };
 }
 
-/// 已见通知：在过去某一轮同步的通知列表里出现过的通知。
-///
-/// 通知一旦发出内容就不再变化，所以详情解析成功的通知会把正文与任务入口链接
-/// 一并记下（[detailParsed] 为真），后续同步直接复用，不再请求它的详情页。
-/// 只是在列表里露过面、或详情抓取失败的通知，[detailParsed] 保持为假，下一轮
-/// 照常重试——否则一次失败会被永久记成「已解析」，那条通知的待办就再也进不来。
+/// A notice recorded by an earlier sync. See “已见通知” in CONTEXT.md.
 class SeenNotice {
   const SeenNotice({
     required this.id,
     this.detailParsed = false,
+    this.sendTag,
     this.title = '',
     this.sendTime,
     this.content,
@@ -106,6 +102,7 @@ class SeenNotice {
 
   final String id;
   final bool detailParsed;
+  final Object? sendTag;
 
   /// 通知标题与发出时间。两者都参与待办的构建——发出时间还用来补全「06-20 23:59」
   /// 这类不带年份的截止时间，所以记录里必须留着，否则补回来的待办会和原样抓取
@@ -120,6 +117,7 @@ class SeenNotice {
     return SeenNotice(
       id: json.readString('id'),
       detailParsed: json['detailParsed'] == true,
+      sendTag: json['sendTag'],
       title: json.readString('title'),
       sendTime: json.readNullableString('sendTime'),
       content: json.readNullableString('content'),
@@ -135,6 +133,7 @@ class SeenNotice {
   Map<String, dynamic> toJson() => {
     'id': id,
     'detailParsed': detailParsed,
+    if (sendTag != null) 'sendTag': sendTag,
     'title': title,
     if (sendTime != null) 'sendTime': sendTime,
     if (content != null) 'content': content,
@@ -240,9 +239,7 @@ class AppSyncResponse {
   }
 }
 
-/// 已见通知的条数上限，与收件箱单轮抓取条数的上限一致：一轮同步见到的通知永远
-/// 记得下，更早的按最近优先淘汰。淘汰只会让那条通知下次重新抓一遍详情，不会让
-/// 它的待办消失。
+/// Bounds persisted seen-notice history; older records are discarded first.
 const maxSeenNotices = 500;
 
 List<SeenNotice> _boundSeenNotices(List<SeenNotice> notices) {
@@ -263,9 +260,7 @@ List<SeenNotice> _readSeenNotices(Object? raw) {
   return _boundSeenNotices(
     raw
         .whereType<Map>()
-        .map(
-          (notice) => SeenNotice.fromJson(notice.cast<String, dynamic>()),
-        )
+        .map((notice) => SeenNotice.fromJson(notice.cast<String, dynamic>()))
         .toList(),
   );
 }

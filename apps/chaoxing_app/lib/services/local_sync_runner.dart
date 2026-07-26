@@ -89,7 +89,7 @@ class InboxFetchResult {
     required this.pagesFetched,
     required this.totalFetched,
     required this.messages,
-    this.stoppedAtKnownNotice = false,
+    this.stoppedAtSeenNotice = false,
   });
 
   final String inboxUrl;
@@ -99,7 +99,7 @@ class InboxFetchResult {
 
   /// 翻页是因为撞上已见通知而提前停下的，而不是翻到了尽头或页数上限。
   /// 停下之后的那些页里全是更早的通知，调用方需要自己把它们补回来。
-  final bool stoppedAtKnownNotice;
+  final bool stoppedAtSeenNotice;
 }
 
 class InboxMessage {
@@ -308,7 +308,7 @@ class LocalSyncRunner {
     authenticationMs = syncStopwatch.elapsedMilliseconds;
     phaseStartedAt = authenticationMs;
 
-    final knownNotices = <String, SeenNotice>{
+    final seenNotices = <String, SeenNotice>{
       for (final notice in previous?.seenNotices ?? const <SeenNotice>[])
         notice.id: notice,
     };
@@ -319,7 +319,7 @@ class LocalSyncRunner {
       itemLimit: config.inboxItemLimit,
       pageLimit: config.inboxPageLimit,
       homeHtml: home.html,
-      knownNoticeIds: knownNotices.keys.toSet(),
+      seenNoticeIds: seenNotices.keys.toSet(),
     );
     onProgress?.call(
       const SyncProgress(phase: SyncPhase.inbox, completed: 1, total: 1),
@@ -329,7 +329,20 @@ class LocalSyncRunner {
     final relevant = inbox.messages.where(isAssignmentOrExamRelated).toList();
     final summaries = <DetailSummary>[];
     final failures = <AppSyncFailure>[];
-    final noticesToParse = relevant.take(config.inboxItemLimit).toList();
+    final listedNoticesToParse = relevant.take(config.inboxItemLimit).toList();
+    final carriedNotices = inbox.stoppedAtSeenNotice
+        ? _carriedSeenNotices(
+            seen: previous?.seenNotices ?? const [],
+            listed: inbox.messages.map((message) => message.identity).toSet(),
+            limit: config.inboxItemLimit - listedNoticesToParse.length,
+          )
+        : const <SeenNotice>[];
+    final noticesToParse = [
+      ...listedNoticesToParse,
+      ...carriedNotices
+          .where((notice) => !notice.detailParsed)
+          .map(_messageFromSeenNotice),
+    ];
     onProgress?.call(
       SyncProgress(
         phase: SyncPhase.noticeDetails,
@@ -343,16 +356,15 @@ class LocalSyncRunner {
       _,
     ) async {
       final identity = message.identity;
-      final known = knownNotices[identity];
+      final seen = seenNotices[identity];
       try {
-        if (known != null && known.detailParsed) {
+        if (seen != null && seen.detailParsed) {
           // 通知内容发出后不再变化，已解析过的直接复用，跳过这次详情请求。
           summaries.add(
-            DetailSummary(
+            _summaryFromSeenNotice(
+              seen,
               title: message.title,
               sendTime: message.sendTime,
-              content: known.content,
-              assignmentLinks: known.taskLinks,
             ),
           );
         } else {
@@ -365,6 +377,7 @@ class LocalSyncRunner {
             parsedNotices[identity] = SeenNotice(
               id: identity,
               detailParsed: true,
+              sendTag: message.sendTag,
               title: summary.title,
               sendTime: summary.sendTime,
               content: summary.content,
@@ -397,15 +410,11 @@ class LocalSyncRunner {
         ),
       );
     });
-    if (inbox.stoppedAtKnownNotice) {
-      summaries.addAll(
-        _carriedNoticeSummaries(
-          known: previous?.seenNotices ?? const [],
-          listed: inbox.messages.map((message) => message.identity).toSet(),
-          limit: config.inboxItemLimit - noticesToParse.length,
-        ),
-      );
-    }
+    summaries.addAll(
+      carriedNotices
+          .where((notice) => notice.detailParsed)
+          .map(_summaryFromSeenNotice),
+    );
     noticeDetailsMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
     phaseStartedAt = syncStopwatch.elapsedMilliseconds;
 
@@ -519,27 +528,20 @@ class LocalSyncRunner {
   ///
   /// [limit] 让参与本轮的通知总数与不提前终止时一致，避免越攒越多的记录把
   /// 任务详情阶段越拖越慢。
-  List<DetailSummary> _carriedNoticeSummaries({
-    required List<SeenNotice> known,
+  List<SeenNotice> _carriedSeenNotices({
+    required List<SeenNotice> seen,
     required Set<String> listed,
     required int limit,
   }) {
-    final carried = <DetailSummary>[];
-    for (final notice in known) {
+    final carried = <SeenNotice>[];
+    for (final notice in seen) {
       if (carried.length >= limit) {
         break;
       }
-      if (!notice.detailParsed || listed.contains(notice.id)) {
+      if (listed.contains(notice.id)) {
         continue;
       }
-      carried.add(
-        DetailSummary(
-          title: notice.title,
-          sendTime: notice.sendTime,
-          content: notice.content,
-          assignmentLinks: notice.taskLinks,
-        ),
-      );
+      carried.add(notice);
     }
     return carried;
   }
@@ -559,14 +561,26 @@ class LocalSyncRunner {
       if (identity.isEmpty) {
         continue;
       }
+      final previousNotice = previousById[identity];
+      final listedNotice = SeenNotice(
+        id: identity,
+        sendTag: message.sendTag,
+        title: message.title,
+        sendTime: message.sendTime,
+      );
       merged.add(
         _preferParsedNotice(
           parsed[identity],
-          previousById[identity],
+          previousNotice?.detailParsed == true ? previousNotice : listedNotice,
           identity,
         ),
       );
     }
+    merged.addAll(
+      parsed.values.where(
+        (notice) => !listed.any((message) => message.identity == notice.id),
+      ),
+    );
     return merged..addAll(previous);
   }
 
@@ -607,17 +621,19 @@ class LocalSyncRunner {
   /// keeps a full sync down to a single home request. Without it the home page
   /// is fetched here.
   ///
-  /// [knownNoticeIds] are the 已见通知 of earlier syncs. The listing comes back
+  /// [seenNoticeIds] identifies notices recorded by an earlier sync. See the
+  /// glossary entry for “已见通知” in the repository's CONTEXT.md.
+  /// The listing comes back
   /// newest first, so a page containing one of them means every later page holds
   /// nothing but notices already seen — paging stops there. The whole page is
   /// kept, so new notices sharing it are not lost. [pageLimit] still caps the
-  /// walk for a first sync, where nothing is known yet.
+  /// walk for a first sync, where no notices have been seen yet.
   Future<InboxFetchResult> fetchInboxMessages({
     required String cookie,
     required int itemLimit,
     required int pageLimit,
     String? homeHtml,
-    Set<String> knownNoticeIds = const {},
+    Set<String> seenNoticeIds = const {},
   }) async {
     final normalizedItemLimit = _normalizeLimit(itemLimit, 20, 500);
     final normalizedPageLimit = _normalizeLimit(pageLimit, 1, 20);
@@ -634,11 +650,11 @@ class LocalSyncRunner {
     var lastGetId = '';
     var lastPage = false;
     var pagesFetched = 0;
-    var stoppedAtKnownNotice = false;
+    var stoppedAtSeenNotice = false;
 
     while (messages.length < normalizedItemLimit &&
         !lastPage &&
-        !stoppedAtKnownNotice &&
+        !stoppedAtSeenNotice &&
         pagesFetched < normalizedPageLimit) {
       final data = await _postNoticeList(
         apiUrl: '$_noticeOrigin/pc/notice/getNoticeList',
@@ -667,8 +683,8 @@ class LocalSyncRunner {
         if (notice is Map) {
           final message = _normalizeNotice(notice);
           messages.add(message);
-          if (knownNoticeIds.contains(message.identity)) {
-            stoppedAtKnownNotice = true;
+          if (seenNoticeIds.contains(message.identity)) {
+            stoppedAtSeenNotice = true;
           }
         }
       }
@@ -682,7 +698,7 @@ class LocalSyncRunner {
       pagesFetched: pagesFetched,
       totalFetched: messages.length,
       messages: messages,
-      stoppedAtKnownNotice: stoppedAtKnownNotice && !lastPage,
+      stoppedAtSeenNotice: stoppedAtSeenNotice && !lastPage,
     );
   }
 
@@ -1221,16 +1237,43 @@ class LocalSyncRunner {
 /// 从而让它下一轮又被重抓一遍详情。
 SeenNotice _preferParsedNotice(
   SeenNotice? fresh,
-  SeenNotice? known,
+  SeenNotice? seen,
   String identity,
 ) {
   if (fresh != null && fresh.detailParsed) {
     return fresh;
   }
-  if (known != null && known.detailParsed) {
-    return known;
+  if (seen != null && seen.detailParsed) {
+    return seen;
   }
-  return fresh ?? known ?? SeenNotice(id: identity);
+  return fresh ?? seen ?? SeenNotice(id: identity);
+}
+
+InboxMessage _messageFromSeenNotice(SeenNotice notice) {
+  return InboxMessage(
+    id: notice.id,
+    uuid: null,
+    title: notice.title,
+    sender: null,
+    sendTime: notice.sendTime,
+    isRead: false,
+    content: notice.content,
+    detailUrl: _buildDetailUrl(notice.id, notice.sendTag),
+    sendTag: notice.sendTag,
+  );
+}
+
+DetailSummary _summaryFromSeenNotice(
+  SeenNotice notice, {
+  String? title,
+  String? sendTime,
+}) {
+  return DetailSummary(
+    title: title ?? notice.title,
+    sendTime: sendTime ?? notice.sendTime,
+    content: notice.content,
+    assignmentLinks: notice.taskLinks,
+  );
 }
 
 void _ensureTrustedCookieTarget(Uri uri) {

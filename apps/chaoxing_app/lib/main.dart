@@ -62,6 +62,7 @@ Future<void> main() async {
       await _showMainWindow();
       _openLoginFromDesktop(navigatorKey, controller);
     },
+    onError: (error, _) => debugPrint('Windows 托盘操作失败：$error'),
     onExit: () async {
       controller.dispose();
       await trayService.dispose();

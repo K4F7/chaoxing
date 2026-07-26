@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:chaoxing_app/services/tray_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -62,7 +64,86 @@ void main() {
     await service.dispose();
     expect(bridge.disposed, true);
   });
+
+  test(
+    'tray serializes updates and coalesces pending state to the latest',
+    () async {
+      final bridge = DeferredTrayPlatformBridge();
+      final service = buildService(bridge);
+      final first = service.update(trayState('first'));
+      await bridge.firstUpdateStarted.future;
+
+      final second = service.update(trayState('second'));
+      final third = service.update(trayState('latest'));
+      bridge.releaseFirstUpdate.complete();
+      await Future.wait([first, second, third]);
+
+      expect(bridge.summaries, ['first', 'latest']);
+      expect(bridge.maxConcurrentUpdates, 1);
+    },
+  );
+
+  test('tray exit is idempotent while shutdown is in progress', () async {
+    final bridge = FakeTrayPlatformBridge();
+    final releaseExit = Completer<void>();
+    var exitCalls = 0;
+    final service = TrayService(
+      enabled: true,
+      bridge: bridge,
+      onOpenWindow: () async {},
+      onSyncNow: () async {},
+      onToggleNotifications: () async {},
+      onOpenLoginStatus: () async {},
+      onExit: () async {
+        exitCalls += 1;
+        await releaseExit.future;
+      },
+    );
+
+    final first = service.handleMenuAction('exit');
+    final second = service.handleMenuAction('exit');
+    releaseExit.complete();
+    await Future.wait([first, second]);
+
+    expect(exitCalls, 1);
+  });
+
+  test('tray plugin callbacks report asynchronous action failures', () async {
+    final errors = <Object>[];
+    final service = TrayService(
+      enabled: true,
+      bridge: FakeTrayPlatformBridge(),
+      onOpenWindow: () async => throw StateError('open failed'),
+      onSyncNow: () async {},
+      onToggleNotifications: () async {},
+      onOpenLoginStatus: () async {},
+      onExit: () async {},
+      onError: (error, _) => errors.add(error),
+    );
+
+    service.onTrayIconMouseDown();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(errors, hasLength(1));
+    expect(errors.single, isA<StateError>());
+  });
 }
+
+TrayService buildService(TrayPlatformBridge bridge) => TrayService(
+  enabled: true,
+  bridge: bridge,
+  onOpenWindow: () async {},
+  onSyncNow: () async {},
+  onToggleNotifications: () async {},
+  onOpenLoginStatus: () async {},
+  onExit: () async {},
+);
+
+TrayMenuState trayState(String summary) => TrayMenuState(
+  notificationsPaused: false,
+  syncInProgress: false,
+  authSummary: summary,
+);
 
 class FakeTrayPlatformBridge implements TrayPlatformBridge {
   bool initialized = false;
@@ -94,5 +175,27 @@ class FakeTrayPlatformBridge implements TrayPlatformBridge {
     required WindowListener windowListener,
   }) async {
     disposed = true;
+  }
+}
+
+class DeferredTrayPlatformBridge extends FakeTrayPlatformBridge {
+  final firstUpdateStarted = Completer<void>();
+  final releaseFirstUpdate = Completer<void>();
+  final summaries = <String>[];
+  int concurrentUpdates = 0;
+  int maxConcurrentUpdates = 0;
+
+  @override
+  Future<void> update(TrayMenuState state) async {
+    summaries.add(state.authSummary);
+    concurrentUpdates += 1;
+    if (concurrentUpdates > maxConcurrentUpdates) {
+      maxConcurrentUpdates = concurrentUpdates;
+    }
+    if (!firstUpdateStarted.isCompleted) {
+      firstUpdateStarted.complete();
+      await releaseFirstUpdate.future;
+    }
+    concurrentUpdates -= 1;
   }
 }

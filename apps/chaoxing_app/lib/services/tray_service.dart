@@ -98,6 +98,7 @@ class TrayService with TrayListener, WindowListener {
     required this.onToggleNotifications,
     required this.onOpenLoginStatus,
     required this.onExit,
+    this.onError,
     TrayPlatformBridge? bridge,
     bool? enabled,
   }) : _bridge = bridge ?? const PluginTrayPlatformBridge(),
@@ -108,9 +109,14 @@ class TrayService with TrayListener, WindowListener {
   final Future<void> Function() onToggleNotifications;
   final Future<void> Function() onOpenLoginStatus;
   final Future<void> Function() onExit;
+  final void Function(Object error, StackTrace stackTrace)? onError;
   final TrayPlatformBridge _bridge;
   final bool _enabled;
   bool _allowClose = false;
+  bool _exitRequested = false;
+  bool _disposed = false;
+  TrayMenuState? _queuedState;
+  Future<void>? _updateFuture;
 
   Future<void> initialize(TrayMenuState state) async {
     if (!_enabled) {
@@ -121,8 +127,22 @@ class TrayService with TrayListener, WindowListener {
   }
 
   Future<void> update(TrayMenuState state) async {
-    if (_enabled) {
-      await _bridge.update(state);
+    if (!_enabled || _disposed) {
+      return;
+    }
+    _queuedState = state;
+    return _updateFuture ??= _drainUpdates();
+  }
+
+  Future<void> _drainUpdates() async {
+    try {
+      while (_queuedState != null) {
+        final state = _queuedState!;
+        _queuedState = null;
+        await _bridge.update(state);
+      }
+    } finally {
+      _updateFuture = null;
     }
   }
 
@@ -141,8 +161,18 @@ class TrayService with TrayListener, WindowListener {
         await onOpenLoginStatus();
         return;
       case 'exit':
+        if (_exitRequested) {
+          return;
+        }
+        _exitRequested = true;
         _allowClose = true;
-        await onExit();
+        try {
+          await onExit();
+        } catch (_) {
+          _exitRequested = false;
+          _allowClose = false;
+          rethrow;
+        }
         return;
     }
   }
@@ -155,20 +185,43 @@ class TrayService with TrayListener, WindowListener {
 
   @override
   void onWindowClose() {
-    unawaited(handleWindowClose());
+    _runDetached(handleWindowClose);
   }
 
   @override
   void onTrayIconMouseDown() {
-    unawaited(onOpenWindow());
+    _runDetached(onOpenWindow);
   }
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
-    unawaited(handleMenuAction(menuItem.key));
+    _runDetached(() => handleMenuAction(menuItem.key));
+  }
+
+  void _runDetached(Future<void> Function() action) {
+    unawaited(
+      action().catchError((Object error, StackTrace stackTrace) {
+        final handler = onError;
+        if (handler != null) {
+          handler(error, stackTrace);
+          return;
+        }
+        Zone.current.handleUncaughtError(error, stackTrace);
+      }),
+    );
   }
 
   Future<void> dispose() async {
+    if (_disposed) {
+      return;
+    }
+    _disposed = true;
+    _queuedState = null;
+    try {
+      await _updateFuture;
+    } catch (_) {
+      // The original update caller reports this error. Cleanup must continue.
+    }
     if (_enabled) {
       await _bridge.dispose(trayListener: this, windowListener: this);
     }

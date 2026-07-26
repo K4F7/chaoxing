@@ -3,6 +3,10 @@ import {
   parseAssignmentRequirement,
   type AssignmentRequirement,
 } from "./requirements";
+import {
+  fetchChaoxingWithCookie,
+  isTrustedChaoxingUrl,
+} from "./safe-fetch";
 
 const DEFAULT_INBOX_LIMIT = 100;
 const DEFAULT_DETAILS_LIMIT = 10;
@@ -134,7 +138,7 @@ export async function fetchDetailSummary(input: {
   const id = input.message.uuid || input.message.id;
   const sendTag = input.message.sendTag ?? 0;
   const url = `https://notice.chaoxing.com/pc/notice/${id}/getNoticeDetail?sendTag=${sendTag}`;
-  const response = await fetcher(url, {
+  const response = await fetchChaoxingWithCookie(fetcher, url, {
     headers: {
       Accept: "application/json, text/javascript, */*; q=0.01",
       Cookie: input.cookie,
@@ -199,7 +203,10 @@ export function collectUniqueWorkLinks(
 }
 
 function isWorkOrExamLink(link: string): boolean {
-  return /workOrExam=(?:work|exam)/i.test(link) || /\/(?:work|exam)\b/i.test(link);
+  return (
+    isTrustedChaoxingUrl(link) &&
+    (/workOrExam=(?:work|exam)/i.test(link) || /\/(?:work|exam)\b/i.test(link))
+  );
 }
 
 async function fetchAssignmentRequirement(input: {
@@ -208,8 +215,7 @@ async function fetchAssignmentRequirement(input: {
   cookie: string;
   fetcher: typeof fetch;
 }): Promise<AssignmentRequirement> {
-  const response = await input.fetcher(input.entryUrl, {
-    redirect: "follow",
+  const response = await fetchChaoxingWithCookie(input.fetcher, input.entryUrl, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
       Cookie: input.cookie,

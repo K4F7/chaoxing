@@ -1,4 +1,5 @@
 import { DEFAULT_CHAOXING_HOME_URL } from "./auth";
+import { fetchChaoxingWithCookie } from "./safe-fetch";
 
 const NOTICE_ORIGIN = "https://notice.chaoxing.com";
 
@@ -189,8 +190,7 @@ async function fetchPageText(
   referer: string,
   cookie: string,
 ): Promise<string> {
-  const response = await fetcher(url, {
-    redirect: "follow",
+  const response = await fetchChaoxingWithCookie(fetcher, url, {
     headers: buildHeaders(cookie, referer, "text/html,application/xhtml+xml"),
   });
   if (!response.ok) {
@@ -227,7 +227,7 @@ async function postNoticeList(
     filterTags: "",
   });
 
-  const response = await fetcher(apiUrl, {
+  const response = await fetchChaoxingWithCookie(fetcher, apiUrl, {
     method: "POST",
     headers: {
       ...buildHeaders(cookie, referer, "application/json, text/javascript, */*; q=0.01"),

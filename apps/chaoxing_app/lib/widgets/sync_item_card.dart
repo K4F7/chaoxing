@@ -12,7 +12,9 @@ class SyncItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dueText = item.dueAt == null
+    final dueText = item.status == 'details_loading'
+        ? '截止时间加载中'
+        : item.dueAt == null
         ? '未解析到截止时间'
         : DateFormat('M月d日 HH:mm').format(item.dueAt!);
     final icon = item.isExam ? Icons.assignment_turned_in : Icons.edit_note;

@@ -19,5 +19,7 @@ void main() {
     expect(item.displayStatus, SyncDisplayStatus.today);
     expect(item.dueAt, isNotNull);
     expect(item.courseId, isNull);
+    expect(item.examId, isNull);
+    expect(item.sources, isEmpty);
   });
 }

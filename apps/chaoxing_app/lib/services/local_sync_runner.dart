@@ -64,11 +64,17 @@ enum SyncPhase {
 }
 
 class SyncProgress {
-  const SyncProgress({required this.phase, this.completed = 0, this.total = 0});
+  const SyncProgress({
+    required this.phase,
+    this.completed = 0,
+    this.total = 0,
+    this.partialItems = const [],
+  });
 
   final SyncPhase phase;
   final int completed;
   final int total;
+  final List<SyncItem> partialItems;
 
   String get label => switch (phase) {
     SyncPhase.authentication => '验证登录态',
@@ -409,18 +415,24 @@ class LocalSyncRunner {
 
     final unique = collectUniqueWorkLinks(summaries);
     final items = <SyncItem>[];
-    final uniqueEntries = unique.entries.toList();
+    final uniqueEntries = unique.entries.toList()
+      ..sort(
+        (left, right) =>
+            _buildLoadingItem(left).id.compareTo(_buildLoadingItem(right).id),
+      );
+    final progressiveItems = uniqueEntries.map(_buildLoadingItem).toList();
     var statusFilteredItems = 0;
     onProgress?.call(
       SyncProgress(
         phase: SyncPhase.assignmentDetails,
         total: uniqueEntries.length,
+        partialItems: List.unmodifiable(progressiveItems),
       ),
     );
     var completedAssignmentDetails = 0;
     await _forEachConcurrent(uniqueEntries, _assignmentDetailConcurrency, (
       entry,
-      _,
+      entryIndex,
     ) async {
       try {
         final requirement = await fetchAssignmentRequirement(
@@ -429,7 +441,9 @@ class LocalSyncRunner {
           cookie: cookie,
         );
         if (isActionableWorkStatus(requirement.workStatus)) {
-          items.add(buildSyncItem(requirement, _clock()));
+          final item = buildSyncItem(requirement, _clock());
+          items.add(item);
+          progressiveItems[entryIndex] = item;
         } else {
           statusFilteredItems += 1;
         }
@@ -453,6 +467,7 @@ class LocalSyncRunner {
           phase: SyncPhase.assignmentDetails,
           completed: completedAssignmentDetails,
           total: uniqueEntries.length,
+          partialItems: List.unmodifiable(progressiveItems),
         ),
       );
     });
@@ -1795,6 +1810,33 @@ SyncItem buildSyncItem(
     examId: kind == SyncItemKind.exam ? examId : null,
     answerId: requirement.answerId,
     sources: [requirement.source],
+  );
+}
+
+SyncItem _buildLoadingItem(MapEntry<String, DetailSummary> entry) {
+  final url = entry.key;
+  final isExam = RegExp(
+    r'workOrExam=exam|/exam\b|examId=',
+    caseSensitive: false,
+  ).hasMatch(url);
+  final kind = isExam ? SyncItemKind.exam : SyncItemKind.assignment;
+  final stableId = isExam
+      ? _readUrlParam(url, 'examId') ?? _readUrlParam(url, 'taskrefId')
+      : _readUrlParam(url, 'workId') ?? _readUrlParam(url, 'taskrefId');
+  return SyncItem(
+    id: '${kind.name}-${stableId ?? _hashString(url)}',
+    kind: kind,
+    title: entry.value.title.isEmpty
+        ? (isExam ? '考试' : '作业')
+        : entry.value.title,
+    url: url,
+    sourceTitle: entry.value.title,
+    sourceSendTime: entry.value.sendTime,
+    status: 'details_loading',
+    displayStatus: SyncDisplayStatus.unscheduled,
+    workId: isExam ? null : stableId,
+    examId: isExam ? stableId : null,
+    sources: const ['inbox'],
   );
 }
 

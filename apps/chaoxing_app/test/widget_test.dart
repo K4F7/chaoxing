@@ -271,6 +271,45 @@ void main() {
     expect(find.text('未识别截止时间'), findsOneWidget);
   });
 
+  testWidgets('shows a loading deadline without calling it unrecognized', (
+    tester,
+  ) async {
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 3,
+          inboxItemLimit: 60,
+          refreshMinutes: 0,
+          remindersEnabled: true,
+        ),
+      ),
+      fetcher: (_, {previous}) async => AppSyncResponse(
+        lastSyncedAt: DateTime(2026, 7, 16, 8),
+        authStatus: 'ok',
+        failures: const [],
+        items: const [
+          SyncItem(
+            id: 'assignment-loading',
+            kind: SyncItemKind.assignment,
+            title: '正在解析的作业',
+            url: 'https://mooc1.chaoxing.com/work?workId=2',
+            sourceTitle: '高等数学',
+            status: 'details_loading',
+            displayStatus: SyncDisplayStatus.unscheduled,
+          ),
+        ],
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(ChaoxingApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('截止时间加载中'), findsOneWidget);
+    expect(find.text('未解析到截止时间'), findsNothing);
+  });
+
   testWidgets('settings screen never renders saved cookie and preserves it', (
     tester,
   ) async {

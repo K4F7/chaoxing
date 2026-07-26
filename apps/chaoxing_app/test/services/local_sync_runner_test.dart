@@ -557,6 +557,17 @@ void main() {
     expect(response.items.first.displayStatus, SyncDisplayStatus.today);
     expect(response.items.first.dueInHours, 15);
     expect(response.items.last.displayStatus, SyncDisplayStatus.upcoming);
+    final progressive = progress.firstWhere(
+      (entry) => entry.partialItems.isNotEmpty,
+    );
+    expect(progressive.partialItems.map((item) => item.id), [
+      'assignment-1',
+      'exam-2',
+    ]);
+    expect(
+      progressive.partialItems.map((item) => item.status),
+      everyElement('details_loading'),
+    );
     expect(
       progress.map((entry) => entry.phase),
       containsAllInOrder([

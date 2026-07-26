@@ -73,6 +73,7 @@ class AppController extends ChangeNotifier {
 
   AppConfig _config = AppConfig.empty;
   AppSyncResponse? _sync;
+  List<SyncItem>? _progressiveItems;
   CourseCatalog _courseCatalog = CourseCatalog.empty;
   bool _loading = true;
   bool _refreshing = false;
@@ -97,7 +98,7 @@ class AppController extends ChangeNotifier {
 
   bool get isConfigured => _config.isConfigured;
 
-  List<SyncItem> get items => _sync?.items ?? const [];
+  List<SyncItem> get items => _progressiveItems ?? _sync?.items ?? const [];
 
   List<SyncItem> get overdueItems => items
       .where((item) => item.displayStatus == SyncDisplayStatus.overdue)
@@ -434,6 +435,15 @@ class AppController extends ChangeNotifier {
       return;
     }
     _syncProgress = progress;
+    if (progress.partialItems.isNotEmpty) {
+      final merged = <String, SyncItem>{
+        for (final item in _sync?.items ?? const <SyncItem>[]) item.id: item,
+      };
+      for (final item in progress.partialItems) {
+        merged[item.id] = item;
+      }
+      _progressiveItems = merged.values.toList();
+    }
     _notifyListeners();
   }
 
@@ -462,6 +472,7 @@ class AppController extends ChangeNotifier {
         return false;
       }
       _sync = response;
+      _progressiveItems = null;
       _error = null;
       await _storage.saveCachedSync(response);
       _lastAcceptedRefreshAt = _clock();

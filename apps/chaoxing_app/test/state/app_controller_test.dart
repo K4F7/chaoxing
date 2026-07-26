@@ -74,6 +74,33 @@ void main() {
     expect(runner.forceDiscoveryValues, [true]);
   });
 
+  test('exposes progressive items before the final sync response', () async {
+    final runner = _ProgressiveRunner();
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+      ),
+      runnerFactory: () => runner,
+    );
+    addTearDown(controller.dispose);
+
+    final loading = controller.load();
+    await runner.progressSent.future;
+
+    expect(controller.items.single.id, 'assignment-1');
+    expect(controller.items.single.status, 'details_loading');
+
+    runner.finish(responseWithTitle('已解析作业'));
+    await loading;
+    expect(controller.items.single.title, '已解析作业');
+  });
+
   test('loads cached sync before refreshing configured accounts', () async {
     final cached = responseWithTitle('缓存作业');
     final fresh = responseWithTitle('最新作业');
@@ -896,6 +923,43 @@ class _CourseDiscoveryTrackingRunner extends LocalSyncRunner {
     forceDiscoveryValues.add(forceCourseDiscovery);
     return response;
   }
+}
+
+class _ProgressiveRunner extends LocalSyncRunner {
+  final Completer<void> progressSent = Completer<void>();
+  final Completer<AppSyncResponse> _result = Completer<AppSyncResponse>();
+
+  @override
+  Future<AppSyncResponse> run(
+    AppConfig config, {
+    AppSyncResponse? previous,
+    SyncProgressCallback? onProgress,
+    CourseCatalog courseCatalog = CourseCatalog.empty,
+    bool forceCourseDiscovery = false,
+    CourseCatalogChanged? onCourseCatalogChanged,
+  }) {
+    onProgress?.call(
+      const SyncProgress(
+        phase: SyncPhase.assignmentDetails,
+        total: 1,
+        partialItems: [
+          SyncItem(
+            id: 'assignment-1',
+            kind: SyncItemKind.assignment,
+            title: '正在解析的作业',
+            url: 'https://mooc1.chaoxing.com/work?workId=1',
+            sourceTitle: '通知',
+            status: 'details_loading',
+            displayStatus: SyncDisplayStatus.unscheduled,
+          ),
+        ],
+      ),
+    );
+    progressSent.complete();
+    return _result.future;
+  }
+
+  void finish(AppSyncResponse response) => _result.complete(response);
 }
 
 class _LoadFailingAppStorage extends MemoryAppStorage {

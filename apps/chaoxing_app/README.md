@@ -52,7 +52,9 @@ GitHub Actions 会在 Windows runner 上执行 `flutter analyze`、`flutter test
 中发布 Windows 压缩包和 Android APK；功能分支、PR 和手动触发只上传临时
 artifact，不创建正式 Release。正式 Release 还会生成覆盖 APK 与 Windows ZIP
 的 `SHA256SUMS`，并使用 GitHub Actions `run_number` 作为 Android versionCode
-和 Windows build suffix；同一分支的新构建会取消仍在运行的旧构建。
+和 Windows build suffix；同一分支的新构建会取消仍在运行的旧构建。checkout、
+Java setup 和 artifact action 使用基于 Node 24 的当前官方主版本，避免 Hosted
+Runner 移除 Node 20 后在 Flutter 构建前失败。
 
 两个平台的产物在上传前都会执行内容审计：拒绝 `.dev.vars`、环境文件、
 测试/fixture 目录以及本地运行时数据库进入发布包。CI 只从干净 checkout
@@ -73,6 +75,15 @@ Android Manifest 显式关闭系统备份和明文网络，只声明 HTTPS 外�
 待办缓存与提醒历史不会通过 Android backup 迁移，HTTP query 也不能绕过 App 的
 统一 URL 策略。CI 会持续检查这三项约束。
 
+Windows 上已完成本地 Android release 构建、`apksigner verify` 和 APK 内容审计。
+如果项目位于与默认 Pub Cache 不同的盘符，Kotlin 增量缓存可能因跨盘根路径失败；
+可先把 `PUB_CACHE` 指向项目同盘目录，再运行 `flutter pub get`、`flutter clean` 和
+`flutter build apk --release`。无正式 keystore 时生成的是 debug-signed 临时 APK，
+不能替代 main 分支使用固定 release keystore 的正式发布产物。
+
+设置页底部显示已安装 App 的版本号和构建号，便于核对 Release 与诊断问题；平台
+版本信息暂时不可读时只显示通用不可用提示。
+
 ## 安全边界与已知限制
 
 - Cookie Store 会连同域、路径、Secure 和 host-only 作用域一起保存在设备安全存储中，不会写入普通配置、同步缓存或发布产物；旧的手动 Cookie 字符串仍兼容。
@@ -85,10 +96,15 @@ Android Manifest 显式关闭系统备份和明文网络，只声明 HTTPS 外�
 - 设置页不会回填 Cookie，错误摘要也会对 Cookie 等敏感内容脱敏。
 - 已使用真实学习通账号完成登录、Cookie 自动导入、通知/课程同步和耗时统计验证。
 - Windows 系统通知和托盘常驻已经接入；关闭窗口会隐藏到托盘，选择“退出”后才结束进程。
-- Windows runner 使用用户会话级命名 Mutex 保证单实例；重复启动不会创建第二套托盘、同步定时器或通知服务，并会尝试恢复、聚焦已有主窗口。
+- 系统通知默认使用不含课程名、任务名和截止时间的通用文案，避免锁屏泄露学习内容；可在设置中显式开启任务详情，测试通知会立即预览当前开关且无需先保存，通知点击定位行为不受影响。
+- 设置页底部显示安装包的实际版本号和构建号，便于核对 CI 产物与反馈问题。
+- Windows runner 使用用户会话级命名 Mutex 保证单实例；重复启动不会创建第二套托盘、同步定时器或通知服务。第二实例通过 Windows 注册消息请求主实例自行恢复和聚焦，不依赖可变化的窗口标题；隐藏窗口重复启动恢复和单进程约束已在真实 Release 上自动验证。
+- `tool/verify_windows_single_instance.ps1` 会在本地和 Windows CI 中启动 Release、隐藏主窗口并用第二次启动验证恢复与单进程约束，结束后只清理它自己启动的进程。
+- 托盘状态更新按顺序执行并合并为最新状态，避免慢插件调用让旧菜单覆盖新菜单；快速重复点击退出只执行一次清理，异步托盘回调失败会统一记录。
 - 正式提醒去重历史在每轮提醒处理前自动清理：保留最近 90 天、最多 1000 条，并丢弃异常未来时间；正常的 `itemId + kind + dueAtSnapshot` 去重不受影响，长期托盘运行不会无限扩大偏好数据。
 - 关闭隐藏并保持后台进程、测试通知后端调用均已在真实 Windows 环境验证；通知肉眼可见性、点击打开详情和托盘菜单/退出仍需手动验收。
 - 设置页提供“发送测试通知”，可重复验证 Windows 通知显示以及点击后恢复主窗口，不写入正式提醒去重历史。
+- 作业考试日历默认打开当前月份，不会被列表中的旧过期事项带到历史月份；支持一键返回今天、选择日期查看当天全部截止事项，并在日期格超过 3 项时显示剩余数量。
 - “课程空间补充同步”默认开启；会优先使用当前课程列表接口，并在失败时回退旧接口，抓取的作业和考试按业务 ID 与收件箱结果合并。可在设置中关闭。
 - 课程列表与详情页会过滤明确标记为已完成、已提交/待批阅、已过期/已结束或只能查看/预览的事项；状态不明确的事项仍会保留，避免误删真正待办。
 - 课程任务接口和页面结构可能变化；单通知、单课程或单任务失败会写入诊断但不阻断其他来源。未识别到截止时间的事项会保留在独立分组中。

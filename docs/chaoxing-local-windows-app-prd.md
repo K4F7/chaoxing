@@ -37,15 +37,19 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 
 **Validation**:
 - Worker 验证：`bun run typecheck`、`bun test` 已通过，共 32 tests。
-- Flutter 验证：`flutter analyze`、`flutter test` 已通过，共 110 tests。
+- Flutter 验证：`flutter analyze`、`flutter test` 已通过，共 126 tests。
 - Windows 构建验证：`flutter build windows` 已通过。
+- Android 本地构建验证：Windows 上将 `PUB_CACHE` 设为项目同盘目录后，`flutter build apk --release --build-number 1004`、`apksigner verify` 和 APK 内容审计已通过；本地未提供正式 keystore，因此该产物使用 Debug 证书签名，仅用于构建验证。
+- Windows 单实例回归：Release 构建后运行 `tool/verify_windows_single_instance.ps1`，自动验证隐藏窗口恢复、第二实例退出以及目标路径下只保留一个主进程。
+- 托盘回归：菜单状态更新必须串行且合并为最新状态，退出动作必须幂等，插件事件中的异步失败必须进入统一错误处理；对应 fake bridge 测试持续覆盖。
 - Windows 构建产物：`apps/chaoxing_app/build/windows/x64/runner/Release/chaoxing_app.exe`。
 - Windows CI：Windows runner 执行 `flutter analyze`、`flutter test`、`flutter build windows --release`，并上传 `chaoxing-app-windows-x64.zip`。
+- CI action 基线：checkout、Java setup、artifact upload/download 使用基于 Node 24 的当前官方主版本，避免 GitHub Hosted Runner 移除 Node 20 后在 Flutter 构建前失败。
 - 发布流程：main 分支推送时使用 `github.run_number` 作为 Android versionCode 和 Windows build suffix，由单个 GitHub Release 同时发布 Android APK、Windows x64 压缩包和覆盖两者的 `SHA256SUMS`；生成校验和前显式确认两个产物存在，并列明 Cookie 安全边界、端到端验证状态和已知限制。功能分支、PR 和手动构建只上传临时 artifact。
 - Android main 发布必须从 `ANDROID_KEYSTORE_BASE64` 与 `ANDROID_KEY_PROPERTIES_BASE64` Secrets 恢复固定 release keystore，并通过 `apksigner verify`；缺失 secret 时正式发布失败。本地、功能分支与 PR 可回退 debug 签名，仅作为临时 artifact，密钥文件不得提交或上传。
 - Android `namespace`、`applicationId`、Manifest `.MainActivity` 与 Kotlin package 统一为 `com.sein.chaoxingapp`，CI 在构建前执行入口一致性检查，避免可构建但无法启动的 APK。
 - Android Manifest 必须设置 `allowBackup=false`、`usesCleartextTraffic=false`，并且不声明 HTTP VIEW query；CI 持续检查，防止普通待办缓存/提醒历史进入系统备份或明文网络能力绕过统一 HTTPS 策略。
-- 剩余验证：真实账号端到端网络同步、关闭隐藏保持后台进程和测试通知后端调用已通过；Windows 通知肉眼可见性、通知点击和托盘菜单/退出仍需手动验收。
+- 剩余验证：真实账号端到端网络同步、关闭隐藏保持后台进程、隐藏窗口重复启动恢复、单进程约束和测试通知后端调用已通过；Windows 通知肉眼可见性、通知点击和托盘菜单/退出仍需手动验收。
 
 ---
 
@@ -196,12 +200,13 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - 单次自动同步默认应避免并发；已有同步运行时新触发应跳过或合并。
 - 收件箱、详情、requirements 抓取需要受 limit 控制，避免频繁访问学习通触发风控。
 - App 在隐藏到托盘时继续运行进程内定时器，但真正退出后不得继续同步。
-- Windows runner 必须使用用户会话级命名 Mutex 保证单实例；重复启动不得创建第二套托盘、同步定时器或通知服务，并应尝试恢复已有主窗口。
+- Windows runner 必须使用用户会话级命名 Mutex 保证单实例；重复启动不得创建第二套托盘、同步定时器或通知服务。第二实例通过 Windows 注册消息请求主实例恢复和聚焦，不依赖窗口标题；隐藏窗口恢复与单进程约束必须在真实 Release 上验证。
 - UI 应优先展示缓存结果；网络失败或认证失败时不得清空已缓存 items。
 
 ### Security
 
 - Cookie 必须保存到 `flutter_secure_storage` 或等价平台安全存储，不得保存到 shared_preferences、日志、诊断导出、通知正文或 UI 明文回填。
+- Windows 通知默认只显示通用截止提醒，不含课程名、任务名和具体截止时间；用户可在设置中显式开启详情展示，偏好只保存布尔值。
 - 普通配置、同步缓存、提醒历史、提醒配置可以保存到 `shared_preferences`。
 - 所有 Flutter 带 Cookie 请求必须使用统一 HTTP 客户端，并限制目标为显式学习通 HTTPS 主机 allowlist；不得信任任意子域。
 - Flutter 侧和 Worker 侧均需保持 Cookie-bearing request allowlist。
@@ -263,6 +268,7 @@ Phase 1 MVP 已完成核心迁移：Flutter App 已从 Worker URL + RUN_TOKEN �
 - 可选课程空间数据源已能抓取课程/班级列表。
 - 课程作业与考试任务页补抓、详情时间解析、明确完成状态过滤和逐课程/逐任务失败隔离已接入并通过真实账号验证；课程列表采用最多 6 个请求的有限并发，并在抓取后按原课程顺序确定性处理，仍需随页面变化持续补充 fixture。
 - 2026-07-16 同一真实账号对比：课程列表有限并发将完整同步从 26.5 秒降至 17.7 秒（缩短 33.2%），待办数、过滤统计和失败数保持一致。
+- 作业考试日历默认定位当前月，支持返回今天、选择日期查看当日完整事项，并在单日超过 3 项时显示溢出数量；历史过期事项不会再让初始视图跳离当前月。
 - 阶段耗时真实验证：总计 18.6 秒，认证 0.5 秒、通知列表 2.7 秒、通知详情 2.9 秒、任务详情 6.8 秒、课程扫描 5.7 秒；阶段之和等于总耗时，当前主要瓶颈为收件箱任务详情请求。
 - 收件箱任务详情并发从 6 提高到 8 的真实实验被回退：总耗时恶化到 113.9 秒、任务详情阶段升至 32.9 秒并产生 3 个失败，说明服务端或连接侧出现拥塞/限流；生产配置固定为 6 路。
 - 启动流程增加 5 分钟缓存新鲜期：近期缓存直接展示且不立即重复全量同步，保留手动刷新与原定时器，降低频繁重启触发服务端限流的风险。
@@ -333,7 +339,7 @@ flutter test
 flutter build windows
 ```
 
-Expected: analyze pass; 110 tests pass; Windows release build pass.
+Expected: analyze pass; 126 tests pass; Windows release build pass.
 
 Windows artifact:
 

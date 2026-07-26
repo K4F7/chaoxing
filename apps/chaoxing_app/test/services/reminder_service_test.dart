@@ -67,6 +67,26 @@ void main() {
     expect(delivered, false);
   });
 
+  test(
+    'windows notifier hides task details when privacy mode is enabled',
+    () async {
+      final backend = FakeNotificationBackend();
+      final notifier = WindowsReminderNotifier(backend: backend, enabled: true);
+
+      await notifier.show(
+        ReminderCandidate(
+          key: 'assignment-1|assignment|due',
+          item: syncItem(dueAt: DateTime(2026, 6, 5, 11)),
+          showDetails: false,
+        ),
+      );
+
+      expect(backend.lastRequest?.body, contains('学习任务即将截止'));
+      expect(backend.lastRequest?.body, isNot(contains('作业通知')));
+      expect(backend.lastRequest?.body, isNot(contains('2026-06-05')));
+    },
+  );
+
   test('marks reminder history only after successful delivery', () async {
     final notifier = RecordingReminderNotifier(delivered: true);
     final service = LocalReminderService(notifier: notifier);
@@ -79,6 +99,7 @@ void main() {
     );
 
     expect(notifier.candidates, hasLength(1));
+    expect(notifier.candidates.single.showDetails, isTrue);
     expect(history.contains(notifier.candidates.single.key), true);
   });
 
@@ -116,6 +137,21 @@ void main() {
       expect(notifier.candidates.single.item.title, contains('恢复主窗口'));
     },
   );
+
+  test('passes privacy mode through reminder processing', () async {
+    final notifier = RecordingReminderNotifier(delivered: true);
+    final service = LocalReminderService(notifier: notifier);
+    final now = DateTime(2026, 6, 5, 9);
+
+    await service.process(
+      items: [syncItem(dueAt: now.add(const Duration(hours: 1)))],
+      history: const ReminderHistory.empty(),
+      now: now,
+      showDetails: false,
+    );
+
+    expect(notifier.candidates.single.showDetails, isFalse);
+  });
 }
 
 class FakeNotificationBackend implements DesktopNotificationBackend {

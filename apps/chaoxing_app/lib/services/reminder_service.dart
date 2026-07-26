@@ -69,10 +69,15 @@ class ReminderHistory {
 }
 
 class ReminderCandidate {
-  const ReminderCandidate({required this.key, required this.item});
+  const ReminderCandidate({
+    required this.key,
+    required this.item,
+    this.showDetails = true,
+  });
 
   final String key;
   final SyncItem item;
+  final bool showDetails;
 }
 
 abstract class ReminderNotifier {
@@ -163,8 +168,9 @@ class WindowsReminderNotifier implements ReminderNotifier {
     await _backend.show(
       DesktopNotificationRequest(
         title: item.kind == SyncItemKind.exam ? '考试截止提醒' : '作业截止提醒',
-        body:
-            '${item.sourceTitle}\n${item.title}\n截止：${_formatDueAt(item.dueAt)}',
+        body: candidate.showDetails
+            ? '${item.sourceTitle}\n${item.title}\n截止：${_formatDueAt(item.dueAt)}'
+            : '有一项学习任务即将截止。点击通知可在 App 内查看详情。',
         onClick: () => onNotificationClick?.call(item.id),
       ),
     );
@@ -177,11 +183,12 @@ class LocalReminderService {
 
   final ReminderNotifier notifier;
 
-  Future<bool> sendTestNotification({DateTime? now}) {
+  Future<bool> sendTestNotification({DateTime? now, bool showDetails = true}) {
     final sentAt = now ?? DateTime.now();
     return notifier.show(
       ReminderCandidate(
         key: 'notification-test',
+        showDetails: showDetails,
         item: SyncItem(
           id: 'notification-test',
           kind: SyncItemKind.assignment,
@@ -212,6 +219,7 @@ class LocalReminderService {
     required List<SyncItem> items,
     required ReminderHistory history,
     required DateTime now,
+    bool showDetails = true,
   }) async {
     var next = history.prune(now);
     for (final candidate in collectPending(
@@ -219,7 +227,13 @@ class LocalReminderService {
       history: next,
       now: now,
     )) {
-      final delivered = await notifier.show(candidate);
+      final delivered = await notifier.show(
+        ReminderCandidate(
+          key: candidate.key,
+          item: candidate.item,
+          showDetails: showDetails,
+        ),
+      );
       if (delivered) {
         next = next.markSent(candidate.key, now);
       }

@@ -225,7 +225,7 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
@@ -233,7 +233,7 @@ void main() {
     expect(saved?.cookie, 'UID=real; vc=secret');
     expect(find.textContaining('UID=real'), findsNothing);
 
-    final cookieField = find.byType(TextField).first;
+    final cookieField = find.byKey(const ValueKey('cookie-input'));
     await tester.scrollUntilVisible(
       cookieField,
       -200,
@@ -246,7 +246,7 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
@@ -262,6 +262,8 @@ void main() {
       -200,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(clearButton);
+    await tester.pumpAndSettle();
     await tester.tap(clearButton);
     await tester.pumpAndSettle();
     expect(find.text('保存时将清除 Cookie'), findsOneWidget);
@@ -271,7 +273,7 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
     await tester.tap(saveButton);
     await tester.pumpAndSettle();
@@ -281,13 +283,15 @@ void main() {
 
   testWidgets('settings can send a Windows notification test', (tester) async {
     var calls = 0;
+    bool? requestedDetails;
     await tester.pumpWidget(
       MaterialApp(
         home: SettingsScreen(
           initialConfig: AppConfig.empty,
           onSave: (_) async {},
-          onTestNotification: () async {
+          onTestNotification: (showDetails) async {
             calls += 1;
+            requestedDetails = showDetails;
             return true;
           },
         ),
@@ -295,16 +299,83 @@ void main() {
     );
 
     final testButton = find.widgetWithText(OutlinedButton, '发送测试通知');
-    await tester.scrollUntilVisible(
-      testButton,
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
+    await tester.ensureVisible(testButton);
+    await tester.pumpAndSettle();
     await tester.tap(testButton);
     await tester.pumpAndSettle();
 
     expect(calls, 1);
+    expect(requestedDetails, isFalse);
     expect(find.text('测试通知已发送；点击通知应恢复主窗口'), findsOneWidget);
+  });
+
+  testWidgets('notification test previews the unsaved detail preference', (
+    tester,
+  ) async {
+    bool? requestedDetails;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          onTestNotification: (showDetails) async {
+            requestedDetails = showDetails;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    final detailsSwitch = find.widgetWithText(SwitchListTile, '在系统通知中显示任务详情');
+    await tester.scrollUntilVisible(
+      detailsSwitch,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(detailsSwitch);
+    final testButton = find.widgetWithText(OutlinedButton, '发送测试通知');
+    await tester.scrollUntilVisible(
+      testButton,
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+
+    expect(requestedDetails, isTrue);
+  });
+
+  testWidgets('settings saves notification detail privacy preference', (
+    tester,
+  ) async {
+    AppConfig? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (config) async => saved = config,
+        ),
+      ),
+    );
+
+    final detailsSwitch = find.widgetWithText(SwitchListTile, '在系统通知中显示任务详情');
+    await tester.scrollUntilVisible(
+      detailsSwitch,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(detailsSwitch);
+    final saveButton = find.widgetWithText(FilledButton, '保存并同步');
+    await tester.scrollUntilVisible(
+      saveButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(saved?.showNotificationDetails, isTrue);
   });
 
   testWidgets('settings shows a safe cookie validation error', (tester) async {
@@ -327,5 +398,54 @@ void main() {
 
     expect(find.text('Cookie 格式不安全或无有效字段，请重新登录或检查手动输入'), findsOneWidget);
     expect(find.textContaining('LocalSyncException'), findsNothing);
+  });
+
+  testWidgets('settings shows the installed version and build number', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          versionLabelLoader: () async => '版本 1.2.3（构建 456）',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final version = find.text('版本 1.2.3（构建 456）');
+    await tester.scrollUntilVisible(
+      version,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(version, findsOneWidget);
+  });
+
+  testWidgets('settings degrades safely when version lookup fails', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          versionLabelLoader: () async => throw StateError('unavailable'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final unavailable = find.text('版本信息不可用');
+    await tester.scrollUntilVisible(
+      unavailable,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(unavailable, findsOneWidget);
+    expect(find.textContaining('StateError'), findsNothing);
   });
 }

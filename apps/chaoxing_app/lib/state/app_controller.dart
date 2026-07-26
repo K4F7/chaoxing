@@ -240,8 +240,8 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  Future<bool> sendTestNotification() {
-    return _reminderService.sendTestNotification();
+  Future<bool> sendTestNotification(bool showDetails) {
+    return _reminderService.sendTestNotification(showDetails: showDetails);
   }
 
   Future<void> refresh({bool silent = false}) async {
@@ -342,6 +342,7 @@ class AppController extends ChangeNotifier {
       items: response.items,
       history: history,
       now: _clock(),
+      showDetails: config.showNotificationDetails,
     );
     if (!mapEquals(history.sent, nextHistory.sent)) {
       await _storage.saveReminderHistory(nextHistory);

@@ -5,6 +5,7 @@ class AppConfig {
     required this.inboxItemLimit,
     required this.refreshMinutes,
     required this.remindersEnabled,
+    this.showNotificationDetails = false,
     this.courseSourcesEnabled = true,
     this.courseLimit = 20,
     this.legacyWorkerConfigDetected = false,
@@ -15,6 +16,7 @@ class AppConfig {
   final int inboxItemLimit;
   final int refreshMinutes;
   final bool remindersEnabled;
+  final bool showNotificationDetails;
   final bool courseSourcesEnabled;
   final int courseLimit;
   final bool legacyWorkerConfigDetected;
@@ -28,6 +30,7 @@ class AppConfig {
       inboxItemLimit: _boundedOrDefault(inboxItemLimit, 1, 500, 60),
       refreshMinutes: _normalizedRefreshMinutes(refreshMinutes),
       remindersEnabled: remindersEnabled,
+      showNotificationDetails: showNotificationDetails,
       courseSourcesEnabled: courseSourcesEnabled,
       courseLimit: _boundedOrDefault(courseLimit, 1, 100, 20),
       legacyWorkerConfigDetected: legacyWorkerConfigDetected,
@@ -40,6 +43,7 @@ class AppConfig {
     int? inboxItemLimit,
     int? refreshMinutes,
     bool? remindersEnabled,
+    bool? showNotificationDetails,
     bool? courseSourcesEnabled,
     int? courseLimit,
     bool? legacyWorkerConfigDetected,
@@ -50,6 +54,8 @@ class AppConfig {
       inboxItemLimit: inboxItemLimit ?? this.inboxItemLimit,
       refreshMinutes: refreshMinutes ?? this.refreshMinutes,
       remindersEnabled: remindersEnabled ?? this.remindersEnabled,
+      showNotificationDetails:
+          showNotificationDetails ?? this.showNotificationDetails,
       courseSourcesEnabled: courseSourcesEnabled ?? this.courseSourcesEnabled,
       courseLimit: courseLimit ?? this.courseLimit,
       legacyWorkerConfigDetected:
@@ -63,6 +69,7 @@ class AppConfig {
     inboxItemLimit: 60,
     refreshMinutes: 60,
     remindersEnabled: true,
+    showNotificationDetails: false,
     courseSourcesEnabled: true,
     courseLimit: 20,
   );

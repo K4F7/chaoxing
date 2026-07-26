@@ -39,6 +39,7 @@ class DeviceAppStorage implements AppStorage {
   static const _inboxItemLimitKey = 'inbox_item_limit';
   static const _refreshMinutesKey = 'refresh_minutes';
   static const _remindersEnabledKey = 'reminders_enabled';
+  static const _showNotificationDetailsKey = 'show_notification_details';
   static const _courseSourcesEnabledKey = 'course_sources_enabled';
   static const _courseSourcesDefaultMigrationKey =
       'course_sources_default_enabled_v2';
@@ -71,6 +72,8 @@ class DeviceAppStorage implements AppStorage {
       inboxItemLimit: prefs.getInt(_inboxItemLimitKey) ?? 60,
       refreshMinutes: prefs.getInt(_refreshMinutesKey) ?? 60,
       remindersEnabled: prefs.getBool(_remindersEnabledKey) ?? true,
+      showNotificationDetails:
+          prefs.getBool(_showNotificationDetailsKey) ?? false,
       courseSourcesEnabled: courseSourcesEnabled,
       courseLimit: prefs.getInt(_courseLimitKey) ?? 20,
       legacyWorkerConfigDetected:
@@ -94,6 +97,10 @@ class DeviceAppStorage implements AppStorage {
     await prefs.setInt(_inboxItemLimitKey, config.inboxItemLimit);
     await prefs.setInt(_refreshMinutesKey, config.refreshMinutes);
     await prefs.setBool(_remindersEnabledKey, config.remindersEnabled);
+    await prefs.setBool(
+      _showNotificationDetailsKey,
+      config.showNotificationDetails,
+    );
     await prefs.setBool(_courseSourcesEnabledKey, config.courseSourcesEnabled);
     await prefs.setBool(_courseSourcesDefaultMigrationKey, true);
     await prefs.setInt(_courseLimitKey, config.courseLimit);

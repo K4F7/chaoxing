@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/app_config.dart';
 import '../services/local_sync_runner.dart';
 
 typedef ConfigSaver = Future<void> Function(AppConfig config);
-typedef NotificationTester = Future<bool> Function();
+typedef NotificationTester = Future<bool> Function(bool showDetails);
+typedef VersionLabelLoader = Future<String> Function();
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -12,6 +14,7 @@ class SettingsScreen extends StatefulWidget {
     required this.onSave,
     this.onOpenLogin,
     this.onTestNotification,
+    this.versionLabelLoader = _loadVersionLabel,
     super.key,
   });
 
@@ -19,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
   final ConfigSaver onSave;
   final VoidCallback? onOpenLogin;
   final NotificationTester? onTestNotification;
+  final VersionLabelLoader versionLabelLoader;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -31,7 +35,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _courseLimitController;
   late double _refreshMinutes;
   late bool _remindersEnabled;
+  late bool _showNotificationDetails;
   late bool _courseSourcesEnabled;
+  late final Future<String> _versionLabel;
   bool _clearSavedCookie = false;
   bool _saving = false;
   bool _testingNotification = false;
@@ -51,7 +57,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     _refreshMinutes = widget.initialConfig.refreshMinutes.toDouble();
     _remindersEnabled = widget.initialConfig.remindersEnabled;
+    _showNotificationDetails = widget.initialConfig.showNotificationDetails;
     _courseSourcesEnabled = widget.initialConfig.courseSourcesEnabled;
+    _versionLabel = widget.versionLabelLoader();
   }
 
   @override
@@ -83,6 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 14),
           ],
           TextField(
+            key: const ValueKey('cookie-input'),
             controller: _cookieController,
             onChanged: (value) {
               if (_clearSavedCookie && value.trim().isNotEmpty) {
@@ -185,6 +194,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: _remindersEnabled,
             onChanged: (value) => setState(() => _remindersEnabled = value),
           ),
+          if (_remindersEnabled)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.visibility_outlined),
+              title: const Text('在系统通知中显示任务详情'),
+              subtitle: const Text('关闭后，锁屏和通知中心只显示通用提醒；点击后仍可在 App 内查看详情。'),
+              value: _showNotificationDetails,
+              onChanged: (value) =>
+                  setState(() => _showNotificationDetails = value),
+            ),
           if (widget.onTestNotification != null) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -194,7 +213,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final messenger = ScaffoldMessenger.of(context);
                       setState(() => _testingNotification = true);
                       try {
-                        final delivered = await widget.onTestNotification!();
+                        final delivered = await widget.onTestNotification!(
+                          _showNotificationDetails,
+                        );
                         if (mounted) {
                           messenger.showSnackBar(
                             SnackBar(
@@ -266,6 +287,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           refreshMinutes: _refreshMinutes.round(),
                           remindersEnabled: _remindersEnabled,
+                          showNotificationDetails: _showNotificationDetails,
                           courseSourcesEnabled: _courseSourcesEnabled,
                           courseLimit: _readPositiveInt(
                             _courseLimitController.text,
@@ -301,10 +323,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: const Icon(Icons.save),
             label: Text(_saving ? '保存中' : '保存并同步'),
           ),
+          const SizedBox(height: 16),
+          FutureBuilder<String>(
+            future: _versionLabel,
+            builder: (context, snapshot) {
+              final label = snapshot.hasError
+                  ? '版本信息不可用'
+                  : snapshot.data ?? '版本信息加载中';
+              return Text(
+                label,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              );
+            },
+          ),
         ],
       ),
     );
   }
+}
+
+Future<String> _loadVersionLabel() async {
+  final info = await PackageInfo.fromPlatform();
+  final buildNumber = info.buildNumber.trim();
+  return buildNumber.isEmpty
+      ? '版本 ${info.version}'
+      : '版本 ${info.version}（构建 $buildNumber）';
 }
 
 int _readPositiveInt(String value, int fallback, {required int maximum}) {

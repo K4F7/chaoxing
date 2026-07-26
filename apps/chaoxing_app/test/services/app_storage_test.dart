@@ -29,6 +29,7 @@ void main() {
           inboxItemLimit: 60,
           refreshMinutes: 60,
           remindersEnabled: true,
+          showNotificationDetails: true,
           courseSourcesEnabled: true,
           courseLimit: 12,
         ),
@@ -37,6 +38,7 @@ void main() {
       final loaded = await storage.loadConfig();
       expect(loaded.cookie, 'UID=real; vc=secret');
       expect(loaded.courseSourcesEnabled, isTrue);
+      expect(loaded.showNotificationDetails, isTrue);
       expect(loaded.courseLimit, 12);
       final prefs = SharedPreferencesAsync();
       final preferenceDump = (await prefs.getAll()).entries
@@ -66,6 +68,7 @@ void main() {
     final loaded = await storage.loadConfig();
 
     expect(loaded.courseSourcesEnabled, isTrue);
+    expect(loaded.showNotificationDetails, isFalse);
   });
 
   test(

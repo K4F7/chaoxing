@@ -33,9 +33,6 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\学习通待办"; Filename: "{app}\chaoxing_app.exe"; WorkingDir: "{app}"
 
-[Registry]
-Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "ChaoxingTodo"; Flags: uninsdeletevalue dontcreatekey
-
 [Code]
 function WebView2Installed: Boolean;
 var
@@ -51,6 +48,13 @@ begin
     RegQueryStringValue(HKCU,
       'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E2F8-A4E8-4A4A-9B9A-8F6F8C5A0D54}',
       'pv', Version);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKCU,
+      'Software\Microsoft\Windows\CurrentVersion\Run', 'ChaoxingTodo');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

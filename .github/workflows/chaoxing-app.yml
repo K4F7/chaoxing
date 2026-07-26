@@ -165,11 +165,40 @@ jobs:
             -DestinationPath "build/chaoxing-app-windows-x64.zip" `
             -Force
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build per-user Windows installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=1.0.${{ github.run_number }}" `
+            "installer/chaoxing_app.iss"
+
+      - name: Verify silent installer lifecycle
+        shell: pwsh
+        run: ./tool/verify_windows_installer.ps1
+
+      - name: Audit Windows distributables
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            "build/chaoxing-app-windows-x64.zip",
+            "build/chaoxing-app-windows-x64-setup.exe"
+          )
+          foreach ($artifact in $artifacts) {
+            if (-not (Test-Path -LiteralPath $artifact)) {
+              throw "Missing Windows artifact: $artifact"
+            }
+          }
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v7
         with:
           name: chaoxing-app-windows-x64
-          path: apps/chaoxing_app/build/chaoxing-app-windows-x64.zip
+          path: |
+            apps/chaoxing_app/build/chaoxing-app-windows-x64.zip
+            apps/chaoxing_app/build/chaoxing-app-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
@@ -196,6 +225,7 @@ jobs:
           cd release-assets
           test -f app-release.apk
           test -f chaoxing-app-windows-x64.zip
+          test -f chaoxing-app-windows-x64-setup.exe
           find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
             | sort -z \
             | xargs -0 sha256sum \
@@ -211,7 +241,7 @@ jobs:
           body: |
             ## 使用说明
 
-            - Windows：解压 `chaoxing-app-windows-x64.zip` 后运行 `chaoxing_app.exe`。
+            - Windows：推荐运行 `chaoxing-app-windows-x64-setup.exe` 安装；也可解压便携版 ZIP 后运行 `chaoxing_app.exe`。
             - Android：安装 `app-release.apk`。
             - 内部构建号：`${{ github.run_number }}`（Android versionCode / Windows build suffix）。
             - 完整性校验：使用 `SHA256SUMS` 核对 APK 和 Windows ZIP 的 SHA-256。
@@ -219,6 +249,8 @@ jobs:
             - Windows 客户端支持内置 WebView2 登录并自动导入 Cookie，也保留手动导入作为备用方式。
 
             ## 当前限制
+
+            - Windows 安装器未购买代码签名证书，首次下载或运行时可能出现 SmartScreen 警告；请先核对 `SHA256SUMS`，确认来源后选择继续运行。
 
             - 已使用真实学习通账号验证登录、Cookie 自动导入、收件箱与课程空间同步；学习通页面或接口变化后仍可能需要更新解析规则。
             - Windows 系统通知和托盘常驻已接入；通知肉眼可见性、点击行为和托盘菜单退出仍需按发布版本手动验收。

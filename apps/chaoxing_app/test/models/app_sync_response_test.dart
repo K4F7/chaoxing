@@ -236,6 +236,8 @@ void main() {
         SeenNotice(
           id: 'notice-1',
           detailParsed: true,
+          title: '高等数学作业通知',
+          sendTime: '2025-12-01 00:30:00',
           content: '结束时间：06-20 23:59',
           taskLinks: ['https://mooc1.chaoxing.com/work?workId=1'],
         ),
@@ -250,6 +252,8 @@ void main() {
       'notice-2',
     ]);
     expect(restored.seenNotices.first.detailParsed, isTrue);
+    expect(restored.seenNotices.first.title, '高等数学作业通知');
+    expect(restored.seenNotices.first.sendTime, '2025-12-01 00:30:00');
     expect(restored.seenNotices.first.content, '结束时间：06-20 23:59');
     expect(restored.seenNotices.first.taskLinks, [
       'https://mooc1.chaoxing.com/work?workId=1',

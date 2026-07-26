@@ -855,6 +855,226 @@ void main() {
     });
   });
 
+  group('inbox paging', () {
+    /// Serves one notice list page per entry of [pages], newest page first, and
+    /// never reports a last page — so only the page limit or an early stop ends
+    /// the walk. Every notice carries its deadline in its own task page.
+    MockClient pagingClient({
+      required List<String> calls,
+      required List<List<String>> Function() pages,
+    }) {
+      return MockClient((request) async {
+        final url = request.url.toString();
+        calls.add('${request.method} $url');
+
+        if (url.startsWith('https://i.chaoxing.com/base')) {
+          return http.Response(
+            '个人空间 https://notice.chaoxing.com/pc/notice/myNotice?s=paging',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+        if (url.startsWith('https://notice.chaoxing.com/pc/notice/myNotice')) {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+        if (request.method == 'POST' &&
+            url == 'https://notice.chaoxing.com/pc/notice/getNoticeList') {
+          final lastValue = request.bodyFields['lastValue'] ?? '';
+          final index = lastValue.isEmpty
+              ? 0
+              : int.parse(lastValue.substring(1));
+          final page = pages();
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'notices': {
+                'list': [
+                  if (index < page.length)
+                    for (final id in page[index])
+                      {
+                        'id': id,
+                        'title': '作业通知 $id',
+                        'sendTime': '2026-06-01 08:00:00',
+                        'sendTag': 0,
+                      },
+                ],
+                'lastGetId': 'p${index + 1}',
+                'lastPage': false,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        final detail = RegExp(
+          r'/pc/notice/([^/]+)/getNoticeDetail',
+        ).firstMatch(url);
+        if (detail != null) {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'msg': {
+                'content': '作业安排',
+                'rtf_content':
+                    'https://mooc1.chaoxing.com/work?workOrExam=work'
+                    '&workId=${detail.group(1)}',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (url.startsWith('https://mooc1.chaoxing.com/work?')) {
+          final id = request.url.queryParameters['workId']!;
+          return http.Response(
+            '<title>作业作答</title><input id="workId" value="$id" />'
+            '<p>截止时间：2026-06-20 23:59</p>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+        return http.Response('not found', 404);
+      });
+    }
+
+    const config = AppConfig(
+      cookie: 'UID=1',
+      inboxPageLimit: 3,
+      inboxItemLimit: 20,
+      refreshMinutes: 60,
+      remindersEnabled: true,
+      courseSourcesEnabled: false,
+    );
+
+    Iterable<String> noticeListCalls(List<String> calls) =>
+        calls.where((call) => call.endsWith('/getNoticeList'));
+
+    test('walks up to the page limit when nothing is known yet', () async {
+      final calls = <String>[];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(
+          calls: calls,
+          pages: () => [
+            ['n1'],
+            ['n2'],
+            ['n3'],
+          ],
+        ),
+      );
+
+      final response = await runner.run(config);
+
+      expect(noticeListCalls(calls), hasLength(3));
+      expect(response.items.map((item) => item.id), [
+        'assignment-n1',
+        'assignment-n2',
+        'assignment-n3',
+      ]);
+    });
+
+    test('stops paging on the page that repeats a known notice', () async {
+      final calls = <String>[];
+      var pages = [
+        ['n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(calls: calls, pages: () => pages),
+      );
+
+      final first = await runner.run(config);
+
+      pages = [
+        ['n4', 'n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      calls.clear();
+      final second = await runner.run(config, previous: first);
+
+      expect(noticeListCalls(calls), hasLength(1));
+      expect(second.items.map((item) => item.id), contains('assignment-n4'));
+    });
+
+    test('stops after the later page that repeats a known notice', () async {
+      final calls = <String>[];
+      var pages = [
+        ['n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(calls: calls, pages: () => pages),
+      );
+
+      final first = await runner.run(config);
+
+      pages = [
+        ['n5'],
+        ['n4', 'n1'],
+        ['n2'],
+      ];
+      calls.clear();
+      final second = await runner.run(config, previous: first);
+
+      expect(noticeListCalls(calls), hasLength(2));
+      expect(
+        second.items.map((item) => item.id),
+        containsAll(['assignment-n4', 'assignment-n5']),
+      );
+    });
+
+    test('an early stop leaves the todo set unchanged', () async {
+      final calls = <String>[];
+      var pages = [
+        ['n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(calls: calls, pages: () => pages),
+      );
+
+      final first = await runner.run(config);
+
+      pages = [
+        ['n4', 'n1'],
+        ['n2'],
+        ['n3'],
+      ];
+      final second = await runner.run(config, previous: first);
+
+      expect(second.items.map((item) => item.id), [
+        'assignment-n1',
+        'assignment-n2',
+        'assignment-n3',
+        'assignment-n4',
+      ]);
+      expect(second.failures, isEmpty);
+      for (final id in ['n1', 'n2', 'n3', 'n4']) {
+        expect(
+          second.items.firstWhere((item) => item.id == 'assignment-$id').dueAt,
+          DateTime.parse('2026-06-20T23:59:00'),
+        );
+      }
+
+      final carried = second.items.firstWhere(
+        (item) => item.id == 'assignment-n2',
+      );
+      final listed = first.items.firstWhere(
+        (item) => item.id == 'assignment-n2',
+      );
+      expect(carried.sourceTitle, listed.sourceTitle);
+      expect(carried.sourceSendTime, listed.sourceSendTime);
+      expect(carried.sourceSendTime, isNotNull);
+    });
+  });
+
   test('blames the auth phase when the shared home page fails', () async {
     final calls = <String>[];
     final runner = LocalSyncRunner(

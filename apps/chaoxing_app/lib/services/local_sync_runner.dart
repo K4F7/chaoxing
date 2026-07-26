@@ -89,12 +89,17 @@ class InboxFetchResult {
     required this.pagesFetched,
     required this.totalFetched,
     required this.messages,
+    this.stoppedAtKnownNotice = false,
   });
 
   final String inboxUrl;
   final int pagesFetched;
   final int totalFetched;
   final List<InboxMessage> messages;
+
+  /// 翻页是因为撞上已见通知而提前停下的，而不是翻到了尽头或页数上限。
+  /// 停下之后的那些页里全是更早的通知，调用方需要自己把它们补回来。
+  final bool stoppedAtKnownNotice;
 }
 
 class InboxMessage {
@@ -303,12 +308,18 @@ class LocalSyncRunner {
     authenticationMs = syncStopwatch.elapsedMilliseconds;
     phaseStartedAt = authenticationMs;
 
+    final knownNotices = <String, SeenNotice>{
+      for (final notice in previous?.seenNotices ?? const <SeenNotice>[])
+        notice.id: notice,
+    };
+
     onProgress?.call(const SyncProgress(phase: SyncPhase.inbox, total: 1));
     final inbox = await fetchInboxMessages(
       cookie: cookie,
       itemLimit: config.inboxItemLimit,
       pageLimit: config.inboxPageLimit,
       homeHtml: home.html,
+      knownNoticeIds: knownNotices.keys.toSet(),
     );
     onProgress?.call(
       const SyncProgress(phase: SyncPhase.inbox, completed: 1, total: 1),
@@ -326,10 +337,6 @@ class LocalSyncRunner {
       ),
     );
     var completedNoticeDetails = 0;
-    final knownNotices = <String, SeenNotice>{
-      for (final notice in previous?.seenNotices ?? const <SeenNotice>[])
-        notice.id: notice,
-    };
     final parsedNotices = <String, SeenNotice>{};
     await _forEachConcurrent(noticesToParse, _noticeDetailConcurrency, (
       message,
@@ -358,6 +365,8 @@ class LocalSyncRunner {
             parsedNotices[identity] = SeenNotice(
               id: identity,
               detailParsed: true,
+              title: summary.title,
+              sendTime: summary.sendTime,
               content: summary.content,
               taskLinks: summary.assignmentLinks,
             );
@@ -388,6 +397,15 @@ class LocalSyncRunner {
         ),
       );
     });
+    if (inbox.stoppedAtKnownNotice) {
+      summaries.addAll(
+        _carriedNoticeSummaries(
+          known: previous?.seenNotices ?? const [],
+          listed: inbox.messages.map((message) => message.identity).toSet(),
+          limit: config.inboxItemLimit - noticesToParse.length,
+        ),
+      );
+    }
     noticeDetailsMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
     phaseStartedAt = syncStopwatch.elapsedMilliseconds;
 
@@ -492,6 +510,40 @@ class LocalSyncRunner {
     );
   }
 
+  /// 补回提前终止后没再列出的已见通知。
+  ///
+  /// 提前终止跳过的页里全是更早的通知，它们的任务入口链接已经记在已见通知里。
+  /// 不补回来，这一轮的待办就会凭空少掉几条，而界面上看不出任何异常——三周前
+  /// 那条通知里下个月才截止的作业会安静地消失。任务详情页仍然逐个重取，所以
+  /// 截止时间与提交状态照旧是最新的。
+  ///
+  /// [limit] 让参与本轮的通知总数与不提前终止时一致，避免越攒越多的记录把
+  /// 任务详情阶段越拖越慢。
+  List<DetailSummary> _carriedNoticeSummaries({
+    required List<SeenNotice> known,
+    required Set<String> listed,
+    required int limit,
+  }) {
+    final carried = <DetailSummary>[];
+    for (final notice in known) {
+      if (carried.length >= limit) {
+        break;
+      }
+      if (!notice.detailParsed || listed.contains(notice.id)) {
+        continue;
+      }
+      carried.add(
+        DetailSummary(
+          title: notice.title,
+          sendTime: notice.sendTime,
+          content: notice.content,
+          assignmentLinks: notice.taskLinks,
+        ),
+      );
+    }
+    return carried;
+  }
+
   /// 汇总本轮之后的已见通知，本轮列表里出现过的排在前面。
   ///
   /// 返回的候选可能重复，去重与条数上限由 [AppSyncResponse.build] 统一执行。
@@ -554,11 +606,18 @@ class LocalSyncRunner {
   /// [homeHtml] is the already-fetched home page when the caller has one, which
   /// keeps a full sync down to a single home request. Without it the home page
   /// is fetched here.
+  ///
+  /// [knownNoticeIds] are the 已见通知 of earlier syncs. The listing comes back
+  /// newest first, so a page containing one of them means every later page holds
+  /// nothing but notices already seen — paging stops there. The whole page is
+  /// kept, so new notices sharing it are not lost. [pageLimit] still caps the
+  /// walk for a first sync, where nothing is known yet.
   Future<InboxFetchResult> fetchInboxMessages({
     required String cookie,
     required int itemLimit,
     required int pageLimit,
     String? homeHtml,
+    Set<String> knownNoticeIds = const {},
   }) async {
     final normalizedItemLimit = _normalizeLimit(itemLimit, 20, 500);
     final normalizedPageLimit = _normalizeLimit(pageLimit, 1, 20);
@@ -575,9 +634,11 @@ class LocalSyncRunner {
     var lastGetId = '';
     var lastPage = false;
     var pagesFetched = 0;
+    var stoppedAtKnownNotice = false;
 
     while (messages.length < normalizedItemLimit &&
         !lastPage &&
+        !stoppedAtKnownNotice &&
         pagesFetched < normalizedPageLimit) {
       final data = await _postNoticeList(
         apiUrl: '$_noticeOrigin/pc/notice/getNoticeList',
@@ -604,7 +665,11 @@ class LocalSyncRunner {
           break;
         }
         if (notice is Map) {
-          messages.add(_normalizeNotice(notice));
+          final message = _normalizeNotice(notice);
+          messages.add(message);
+          if (knownNoticeIds.contains(message.identity)) {
+            stoppedAtKnownNotice = true;
+          }
         }
       }
 
@@ -617,6 +682,7 @@ class LocalSyncRunner {
       pagesFetched: pagesFetched,
       totalFetched: messages.length,
       messages: messages,
+      stoppedAtKnownNotice: stoppedAtKnownNotice && !lastPage,
     );
   }
 

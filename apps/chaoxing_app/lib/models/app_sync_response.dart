@@ -98,12 +98,20 @@ class SeenNotice {
   const SeenNotice({
     required this.id,
     this.detailParsed = false,
+    this.title = '',
+    this.sendTime,
     this.content,
     this.taskLinks = const [],
   });
 
   final String id;
   final bool detailParsed;
+
+  /// 通知标题与发出时间。两者都参与待办的构建——发出时间还用来补全「06-20 23:59」
+  /// 这类不带年份的截止时间，所以记录里必须留着，否则补回来的待办会和原样抓取
+  /// 的不一致。
+  final String title;
+  final String? sendTime;
   final String? content;
   final List<String> taskLinks;
 
@@ -112,9 +120,14 @@ class SeenNotice {
     return SeenNotice(
       id: json.readString('id'),
       detailParsed: json['detailParsed'] == true,
+      title: json.readString('title'),
+      sendTime: json.readNullableString('sendTime'),
       content: json.readNullableString('content'),
       taskLinks: rawLinks is List
-          ? rawLinks.whereType<String>().where((link) => link.isNotEmpty).toList()
+          ? rawLinks
+                .whereType<String>()
+                .where((link) => link.isNotEmpty)
+                .toList()
           : const [],
     );
   }
@@ -122,6 +135,8 @@ class SeenNotice {
   Map<String, dynamic> toJson() => {
     'id': id,
     'detailParsed': detailParsed,
+    'title': title,
+    if (sendTime != null) 'sendTime': sendTime,
     if (content != null) 'content': content,
     'taskLinks': taskLinks,
   };

@@ -1,6 +1,6 @@
 # 学习通待办 App
 
-Flutter Windows 桌面客户端。本 App 在本机使用学习通 Cookie 同步收件箱里的作业和考试待办，并可选择从课程空间补抓作业/考试列表，不再把 Worker URL 或 RUN_TOKEN 作为 App 的主配置入口。
+Flutter 客户端，当前面向 Windows 桌面。App 在本机使用学习通 Cookie 同步收件箱里的作业和考试待办，并可选择从课程空间补抓作业/考试列表。术语见仓库根目录的 [CONTEXT.md](../../CONTEXT.md)。
 
 ## 首次配置
 
@@ -128,21 +128,10 @@ query。导出前会统一隐藏 token、Bearer、Cookie 片段和账号类参�
 
 ## 开发验证
 
-在仓库根目录运行 Worker/TypeScript 侧验证：
-
-```sh
-bun run typecheck
-bun test
-```
-
-在 App 目录运行 Flutter 侧验证：
+在 App 目录运行：
 
 ```sh
 flutter analyze
 flutter test
 flutter build windows
 ```
-
-## 旧配置说明
-
-早期版本通过 Cloudflare Worker 的 `/app/sync` 接口同步，并需要 Worker URL 与 RUN_TOKEN。当前 Windows App 的主路径已经迁移为本地 Cookie 同步；检测到旧 Worker 配置时，App 只提示旧配置已不再使用，保存本地 Cookie 后会清理旧值。

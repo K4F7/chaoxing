@@ -33,8 +33,8 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\学习通待办"; Filename: "{app}\chaoxing_app.exe"; WorkingDir: "{app}"
 
-[UninstallRun]
-Filename: "{sys}\reg.exe"; Parameters: "delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v ChaoxingTodo /f"; Flags: runhidden; RunOnceId: "RemoveAutostart"
+[Registry]
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "ChaoxingTodo"; Flags: uninsdeletevalue dontcreatekey
 
 [Code]
 function WebView2Installed: Boolean;

@@ -2287,12 +2287,16 @@ DateTime _dateFromParts(
 }
 
 int _inferYear(int month, String? sourceSendTime, DateTime fallbackDate) {
-  final source = sourceSendTime == null
+  final normalized = sourceSendTime?.trim().replaceAll('/', '-');
+  final sourceParts = normalized == null
       ? null
-      : parseChaoxingDateTime(sourceSendTime, null, fallbackDate);
-  final base = (source ?? fallbackDate).toLocal();
-  final year = base.year;
-  final sourceMonth = base.month;
+      : RegExp(r'^(\d{4})-(\d{1,2})-').firstMatch(normalized);
+  final year = sourceParts == null
+      ? fallbackDate.toLocal().year
+      : int.parse(sourceParts.group(1)!);
+  final sourceMonth = sourceParts == null
+      ? fallbackDate.toLocal().month
+      : int.parse(sourceParts.group(2)!);
   return sourceMonth == 12 && month == 1 ? year + 1 : year;
 }
 

@@ -1078,8 +1078,11 @@ void main() {
       expect(second.failures, isEmpty);
       for (final id in ['n1', 'n2', 'n3', 'n4']) {
         expect(
-          second.items.firstWhere((item) => item.id == 'assignment-$id').dueAt,
-          DateTime.parse('2026-06-20T23:59:00'),
+          second.items
+              .firstWhere((item) => item.id == 'assignment-$id')
+              .dueAt
+              ?.toUtc(),
+          DateTime.parse('2026-06-20T15:59:00Z'),
         );
       }
 
@@ -1267,7 +1270,7 @@ void main() {
         isA<LocalSyncException>().having(
           (error) => error.message,
           'message',
-              contains('登录已失效'),
+          contains('登录已失效'),
         ),
       ),
     );

@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/sync_item.dart';
 import '../services/autostart_service.dart';
 import '../services/local_diagnostics.dart';
+import '../services/update_service.dart';
 import '../state/app_controller.dart';
 import '../widgets/month_calendar.dart';
 import '../widgets/source_overview.dart';
@@ -112,6 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openSettings(BuildContext context) {
     final autostartService = AutostartService();
+    final updateService = UpdateService();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SettingsScreen(
@@ -126,6 +129,10 @@ class _HomeScreenState extends State<HomeScreen> {
           onAutostartChanged: Platform.isWindows
               ? autostartService.setEnabled
               : null,
+          updateInfoLoader: updateService.check,
+          onOpenReleasePage: (uri) async {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          },
           onTestNotification: Platform.isWindows
               ? widget.controller.sendTestNotification
               : null,

@@ -8,6 +8,7 @@ import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/screens/settings_screen.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
 import 'package:chaoxing_app/services/local_sync_runner.dart';
+import 'package:chaoxing_app/services/update_service.dart';
 import 'package:chaoxing_app/state/app_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -115,6 +116,35 @@ void main() {
 
     expect(requested, isTrue);
     expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+  });
+
+  testWidgets('settings only prompts when a newer build is available', (
+    tester,
+  ) async {
+    Uri? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          updateInfoLoader: () async =>
+              UpdateInfo(buildNumber: 42, releasePage: trustedReleasesPage),
+          onOpenReleasePage: (uri) async => opened = uri,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final prompt = find.text('发现新版本（构建 42）');
+    await tester.scrollUntilVisible(
+      prompt,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(prompt, findsOneWidget);
+    await tester.tap(find.text('查看发布页'));
+    await tester.pump();
+    expect(opened, trustedReleasesPage);
   });
 
   testWidgets('shows setup screen when no cookie config exists', (

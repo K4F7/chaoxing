@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../models/app_config.dart';
 import '../models/course_catalog.dart';
 import '../services/local_sync_runner.dart';
+import '../services/update_service.dart';
 
 typedef ConfigSaver = Future<void> Function(AppConfig config);
 typedef NotificationTester = Future<bool> Function(bool showDetails);
@@ -12,6 +13,8 @@ typedef CourseMonitoringChanged =
     Future<void> Function(String courseKey, bool monitored);
 typedef AutostartEnabledLoader = Future<bool> Function();
 typedef AutostartChanged = Future<void> Function(bool enabled);
+typedef UpdateInfoLoader = Future<UpdateInfo?> Function();
+typedef ReleasePageOpener = Future<void> Function(Uri uri);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -24,6 +27,8 @@ class SettingsScreen extends StatefulWidget {
     this.onRefreshCourses,
     this.autostartEnabledLoader,
     this.onAutostartChanged,
+    this.updateInfoLoader,
+    this.onOpenReleasePage,
     this.versionLabelLoader = _loadVersionLabel,
     super.key,
   });
@@ -37,6 +42,8 @@ class SettingsScreen extends StatefulWidget {
   final Future<void> Function()? onRefreshCourses;
   final AutostartEnabledLoader? autostartEnabledLoader;
   final AutostartChanged? onAutostartChanged;
+  final UpdateInfoLoader? updateInfoLoader;
+  final ReleasePageOpener? onOpenReleasePage;
   final VersionLabelLoader versionLabelLoader;
 
   @override
@@ -54,6 +61,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _courseSourcesEnabled;
   late CourseCatalog _courseCatalog;
   late final Future<String> _versionLabel;
+  Future<UpdateInfo?>? _updateInfo;
   bool _clearSavedCookie = false;
   bool _saving = false;
   bool _testingNotification = false;
@@ -80,6 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _courseSourcesEnabled = widget.initialConfig.courseSourcesEnabled;
     _courseCatalog = widget.courseCatalog;
     _versionLabel = widget.versionLabelLoader();
+    _updateInfo = widget.updateInfoLoader?.call();
     _loadAutostartState();
   }
 
@@ -467,6 +476,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             label: Text(_saving ? '保存中' : '保存并同步'),
           ),
           const SizedBox(height: 16),
+          if (_updateInfo != null)
+            FutureBuilder<UpdateInfo?>(
+              future: _updateInfo,
+              builder: (context, snapshot) {
+                final update = snapshot.data;
+                if (update == null) {
+                  return const SizedBox.shrink();
+                }
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.system_update_alt),
+                    title: Text('发现新版本（构建 ${update.buildNumber}）'),
+                    subtitle: const Text('仅提示更新，不会自动下载、安装或重启。'),
+                    trailing: TextButton(
+                      onPressed: widget.onOpenReleasePage == null
+                          ? null
+                          : () => widget.onOpenReleasePage!(update.releasePage),
+                      child: const Text('查看发布页'),
+                    ),
+                  ),
+                );
+              },
+            ),
+          if (_updateInfo != null) const SizedBox(height: 12),
           FutureBuilder<String>(
             future: _versionLabel,
             builder: (context, snapshot) {

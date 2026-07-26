@@ -226,6 +226,24 @@ class _CookieSession {
   String source;
 }
 
+/// One fetch of the chaoxing home page, shared by every phase of a sync that
+/// needs to read it: the auth check, the inbox entry point and course
+/// discovery. [cookie] carries the cookies merged from this response so a later
+/// phase sends exactly what it would have sent had it fetched the page itself.
+class _HomePage {
+  const _HomePage({
+    required this.html,
+    required this.finalUrl,
+    required this.statusCode,
+    required this.cookie,
+  });
+
+  final String html;
+  final String finalUrl;
+  final int statusCode;
+  final String cookie;
+}
+
 class LocalSyncRunner {
   LocalSyncRunner({
     http.Client? client,
@@ -267,7 +285,8 @@ class LocalSyncRunner {
     onProgress?.call(
       const SyncProgress(phase: SyncPhase.authentication, total: 1),
     );
-    final auth = await checkAuth(cookie);
+    final home = await _fetchHomePage(cookie);
+    final auth = _evaluateAuth(home);
     if (!auth.authenticated) {
       throw const LocalSyncException('Cookie 已失效或跳转到登录页，请重新登录后更新 Cookie');
     }
@@ -286,6 +305,7 @@ class LocalSyncRunner {
       cookie: cookie,
       itemLimit: config.inboxItemLimit,
       pageLimit: config.inboxPageLimit,
+      homeHtml: home.html,
     );
     onProgress?.call(
       const SyncProgress(phase: SyncPhase.inbox, completed: 1, total: 1),
@@ -399,6 +419,7 @@ class LocalSyncRunner {
         itemLimit: config.inboxItemLimit,
         items: items,
         failures: failures,
+        home: home,
         onProgress: onProgress,
       );
     }
@@ -435,34 +456,52 @@ class LocalSyncRunner {
   }
 
   Future<AuthCheckResult> checkAuth(String cookie) async {
+    return _evaluateAuth(await _fetchHomePage(cookie));
+  }
+
+  Future<_HomePage> _fetchHomePage(String cookie) async {
+    final session = _CookieSession(cookie);
     final response = await _getWithCookie(
       Uri.parse(_homeUrl),
       headers: _htmlHeaders(cookie, _homeUrl),
+      session: session,
     );
-    final html = _decodeBody(response);
-    final finalUrl = response.request?.url.toString() ?? _homeUrl;
-    final loginDetected = detectLoginSignals(finalUrl, html);
-    return AuthCheckResult(
-      authenticated:
-          response.statusCode >= 200 &&
-          response.statusCode < 300 &&
-          !loginDetected,
+    return _HomePage(
+      html: _decodeBody(response),
+      finalUrl: response.request?.url.toString() ?? _homeUrl,
       statusCode: response.statusCode,
-      loginDetected: loginDetected,
-      finalUrl: redactSensitiveUrl(finalUrl),
-      title: extractPageTitle(html),
+      cookie: session.source,
     );
   }
 
+  AuthCheckResult _evaluateAuth(_HomePage home) {
+    final loginDetected = detectLoginSignals(home.finalUrl, home.html);
+    return AuthCheckResult(
+      authenticated:
+          home.statusCode >= 200 && home.statusCode < 300 && !loginDetected,
+      statusCode: home.statusCode,
+      loginDetected: loginDetected,
+      finalUrl: redactSensitiveUrl(home.finalUrl),
+      title: extractPageTitle(home.html),
+    );
+  }
+
+  /// Reads the inbox listing.
+  ///
+  /// [homeHtml] is the already-fetched home page when the caller has one, which
+  /// keeps a full sync down to a single home request. Without it the home page
+  /// is fetched here.
   Future<InboxFetchResult> fetchInboxMessages({
     required String cookie,
     required int itemLimit,
     required int pageLimit,
+    String? homeHtml,
   }) async {
     final normalizedItemLimit = _normalizeLimit(itemLimit, 20, 500);
     final normalizedPageLimit = _normalizeLimit(pageLimit, 1, 20);
-    final homeHtml = await _fetchPageText(_homeUrl, _homeUrl, cookie);
-    final inboxUrl = findInboxUrl(homeHtml, _homeUrl);
+    final resolvedHomeHtml =
+        homeHtml ?? await _fetchPageText(_homeUrl, _homeUrl, cookie);
+    final inboxUrl = findInboxUrl(resolvedHomeHtml, _homeUrl);
     if (inboxUrl == null) {
       throw const LocalSyncException('未能在学习通首页找到收件箱入口');
     }
@@ -603,13 +642,14 @@ class LocalSyncRunner {
     required int itemLimit,
     required List<SyncItem> items,
     required List<AppSyncFailure> failures,
+    _HomePage? home,
     SyncProgressCallback? onProgress,
   }) async {
     onProgress?.call(const SyncProgress(phase: SyncPhase.courses));
     List<CourseSpace> courses;
     var courseCookie = cookie;
     try {
-      final discovery = await _fetchCourseDiscovery(cookie);
+      final discovery = await _fetchCourseDiscovery(cookie, home: home);
       courses = discovery.courses;
       courseCookie = discovery.cookie;
     } catch (error) {
@@ -804,18 +844,23 @@ class LocalSyncRunner {
     return (await _fetchCourseDiscovery(cookie)).courses;
   }
 
-  Future<_CourseDiscoveryResult> _fetchCourseDiscovery(String cookie) async {
+  Future<_CourseDiscoveryResult> _fetchCourseDiscovery(
+    String cookie, {
+    _HomePage? home,
+  }) async {
     Object? modernError;
-    final session = _CookieSession(cookie);
+    final session = _CookieSession(home?.cookie ?? cookie);
     try {
-      final homeResponse = await _getWithCookie(
-        Uri.parse(_homeUrl),
-        headers: _htmlHeaders(session.source, _homeUrl),
-        session: session,
-      );
-      final interactionUrl = findCourseInteractionUrl(
-        _decodeBody(homeResponse),
-      );
+      final homeHtml =
+          home?.html ??
+          _decodeBody(
+            await _getWithCookie(
+              Uri.parse(_homeUrl),
+              headers: _htmlHeaders(session.source, _homeUrl),
+              session: session,
+            ),
+          );
+      final interactionUrl = findCourseInteractionUrl(homeHtml);
       if (interactionUrl != null) {
         await _getWithCookie(
           Uri.parse(interactionUrl),

@@ -573,6 +573,145 @@ void main() {
     );
   });
 
+  test('requests the chaoxing home page once per sync', () async {
+    final calls = <String>[];
+    final runner = LocalSyncRunner(
+      clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+      client: MockClient((request) async {
+        final url = request.url.toString();
+        calls.add('${request.method} $url');
+
+        if (url.startsWith('https://i.chaoxing.com/base')) {
+          return http.Response(
+            '个人空间 https://notice.chaoxing.com/pc/notice/myNotice?s=shared '
+            '<div dataurl="https://mooc1-1.chaoxing.com/visit/interaction"></div>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+
+        if (url.startsWith('https://notice.chaoxing.com/pc/notice/myNotice')) {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+
+        if (request.method == 'POST' &&
+            url == 'https://notice.chaoxing.com/pc/notice/getNoticeList') {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'notices': {
+                'list': [
+                  {
+                    'id': 'notice-shared',
+                    'title': '作业通知',
+                    'sendTime': '2026-06-01 08:00:00',
+                    'sendTag': 0,
+                  },
+                ],
+                'lastPage': true,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+
+        if (url.contains('/getNoticeDetail')) {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'msg': {
+                'rtf_content':
+                    'https://mooc1.chaoxing.com/work?workOrExam=work&workId=1',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+
+        if (url.startsWith('https://mooc1.chaoxing.com/work?')) {
+          return http.Response(
+            '<title>作业作答</title><input id="workId" value="1" />'
+            '<p>截止时间：2026-06-20 23:59</p>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+
+        if (request.url.path == '/visit/interaction') {
+          return http.Response('course shell', 200);
+        }
+
+        if (request.url.path == '/mooc-ans/visit/courselistdata') {
+          return http.Response(
+            '<ul id="courseList"><li class="course" courseid="1" clazzid="2" '
+            'personid="3"><span class="course-name">测试课程</span></li></ul>',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+
+        if (request.url.path == '/work/task-list' ||
+            request.url.path == '/mooc-ans/exam/phone/task-list') {
+          return http.Response('<ul></ul>', 200);
+        }
+
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final response = await runner.run(
+      const AppConfig(
+        cookie: 'UID=1',
+        inboxPageLimit: 1,
+        inboxItemLimit: 20,
+        refreshMinutes: 60,
+        remindersEnabled: true,
+      ),
+    );
+
+    expect(
+      calls.where((call) => call.contains('i.chaoxing.com/base')),
+      hasLength(1),
+    );
+    expect(response.authStatus, 'ok');
+    expect(response.stats.inboxMessages, 1);
+    expect(response.stats.courses, 1);
+    expect(response.items.map((item) => item.id), ['assignment-1']);
+    expect(response.failures, isEmpty);
+  });
+
+  test('blames the auth phase when the shared home page fails', () async {
+    final calls = <String>[];
+    final runner = LocalSyncRunner(
+      client: MockClient((request) async {
+        calls.add('${request.method} ${request.url}');
+        return http.Response('temporarily unavailable', 503);
+      }),
+    );
+
+    await expectLater(
+      runner.run(
+        const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+      ),
+      throwsA(
+        isA<LocalSyncException>().having(
+          (error) => error.message,
+          'message',
+          contains('Cookie 已失效'),
+        ),
+      ),
+    );
+    expect(calls, ['GET https://i.chaoxing.com/base?ws=1&t=1780231212848']);
+  });
+
   test(
     'limits notice detail concurrency and isolates individual failures',
     () async {

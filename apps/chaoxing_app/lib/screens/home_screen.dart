@@ -8,6 +8,7 @@ import '../models/sync_item.dart';
 import '../services/local_diagnostics.dart';
 import '../state/app_controller.dart';
 import '../widgets/month_calendar.dart';
+import '../widgets/source_overview.dart';
 import '../widgets/sync_item_card.dart';
 import 'detail_screen.dart';
 import 'diagnostics_screen.dart';
@@ -195,8 +196,8 @@ class _Dashboard extends StatelessWidget {
               ),
               ButtonSegment(
                 value: 2,
-                icon: Icon(Icons.school),
-                label: Text('课程表'),
+                icon: Icon(Icons.account_tree_outlined),
+                label: Text('来源'),
               ),
             ],
             selected: {tabIndex},
@@ -208,7 +209,7 @@ class _Dashboard extends StatelessWidget {
           else if (tabIndex == 1)
             MonthCalendar(items: controller.items, onItemTap: onItemTap)
           else
-            const _CoursePlaceholder(),
+            SourceOverview(items: controller.items, onItemTap: onItemTap),
         ],
       ),
     );
@@ -512,19 +513,6 @@ class _EmptySetup extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _CoursePlaceholder extends StatelessWidget {
-  const _CoursePlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const _BlankState(
-      icon: Icons.school,
-      title: '课程表稍后接入',
-      body: '第一版先展示作业考试日历。真实课程表会在后续接入抓取或手动录入。',
     );
   }
 }

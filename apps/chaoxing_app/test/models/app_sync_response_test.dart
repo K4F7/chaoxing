@@ -225,6 +225,73 @@ void main() {
     expect(restored.stats.courseTaskStatusFiltered, 3);
     expect(restored.stats.courseSourcesEnabled, isTrue);
   });
+
+  test('round-trips seen notices through cache JSON', () {
+    final response = AppSyncResponse(
+      lastSyncedAt: DateTime(2026, 7, 16, 12),
+      authStatus: 'ok',
+      items: const [],
+      failures: const [],
+      seenNotices: const [
+        SeenNotice(
+          id: 'notice-1',
+          detailParsed: true,
+          content: '结束时间：06-20 23:59',
+          taskLinks: ['https://mooc1.chaoxing.com/work?workId=1'],
+        ),
+        SeenNotice(id: 'notice-2'),
+      ],
+    );
+
+    final restored = AppSyncResponse.fromJson(response.toJson());
+
+    expect(restored.seenNotices.map((notice) => notice.id), [
+      'notice-1',
+      'notice-2',
+    ]);
+    expect(restored.seenNotices.first.detailParsed, isTrue);
+    expect(restored.seenNotices.first.content, '结束时间：06-20 23:59');
+    expect(restored.seenNotices.first.taskLinks, [
+      'https://mooc1.chaoxing.com/work?workId=1',
+    ]);
+    expect(restored.seenNotices.last.detailParsed, isFalse);
+    expect(restored.seenNotices.last.taskLinks, isEmpty);
+  });
+
+  test('an older cache without seen notices restores as none known', () {
+    final restored = AppSyncResponse.fromJson({
+      'lastSyncedAt': '2026-07-16T12:00:00.000',
+      'authStatus': 'ok',
+      'items': <Object>[],
+      'failures': <Object>[],
+    });
+
+    expect(restored.seenNotices, isEmpty);
+  });
+
+  test('bounds seen notices and keeps the most recent ones', () {
+    final response = AppSyncResponse.build(
+      now: DateTime(2026, 7, 16),
+      lastSyncedAt: DateTime(2026, 7, 16),
+      items: const [],
+      failures: const [],
+      seenNotices: [
+        for (var index = 0; index < maxSeenNotices + 20; index += 1)
+          SeenNotice(id: 'notice-$index'),
+        const SeenNotice(id: 'notice-0', detailParsed: true),
+        const SeenNotice(id: ''),
+      ],
+    );
+
+    expect(response.seenNotices, hasLength(maxSeenNotices));
+    expect(response.seenNotices.first.id, 'notice-0');
+    expect(response.seenNotices.last.id, 'notice-${maxSeenNotices - 1}');
+    expect(response.seenNotices.map((notice) => notice.id), isNot(contains('')));
+    expect(
+      AppSyncResponse.fromJson(response.toJson()).seenNotices,
+      hasLength(maxSeenNotices),
+    );
+  });
 }
 
 SyncItem item({

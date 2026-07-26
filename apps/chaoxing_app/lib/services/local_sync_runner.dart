@@ -119,6 +119,9 @@ class InboxMessage {
   final String? content;
   final String? detailUrl;
   final Object? sendTag;
+
+  /// 通知标识：与详情页地址所用的标识一致，用来跨轮同步认出同一条通知。
+  String get identity => uuid ?? id;
 }
 
 class DetailSummary {
@@ -323,14 +326,43 @@ class LocalSyncRunner {
       ),
     );
     var completedNoticeDetails = 0;
+    final knownNotices = <String, SeenNotice>{
+      for (final notice in previous?.seenNotices ?? const <SeenNotice>[])
+        notice.id: notice,
+    };
+    final parsedNotices = <String, SeenNotice>{};
     await _forEachConcurrent(noticesToParse, _noticeDetailConcurrency, (
       message,
       _,
     ) async {
+      final identity = message.identity;
+      final known = knownNotices[identity];
       try {
-        summaries.add(
-          await fetchDetailSummary(message: message, cookie: cookie),
-        );
+        if (known != null && known.detailParsed) {
+          // 通知内容发出后不再变化，已解析过的直接复用，跳过这次详情请求。
+          summaries.add(
+            DetailSummary(
+              title: message.title,
+              sendTime: message.sendTime,
+              content: known.content,
+              assignmentLinks: known.taskLinks,
+            ),
+          );
+        } else {
+          final summary = await fetchDetailSummary(
+            message: message,
+            cookie: cookie,
+          );
+          summaries.add(summary);
+          if (identity.isNotEmpty) {
+            parsedNotices[identity] = SeenNotice(
+              id: identity,
+              detailParsed: true,
+              content: summary.content,
+              taskLinks: summary.assignmentLinks,
+            );
+          }
+        }
       } catch (error) {
         failures.add(
           AppSyncFailure(
@@ -452,7 +484,38 @@ class LocalSyncRunner {
         itemCandidates: items.map((item) => item.id).toSet().length,
         courseSourcesEnabled: config.courseSourcesEnabled,
       ),
+      seenNotices: _mergeSeenNotices(
+        previous: previous?.seenNotices ?? const [],
+        listed: inbox.messages,
+        parsed: parsedNotices,
+      ),
     );
+  }
+
+  /// 汇总本轮之后的已见通知，本轮列表里出现过的排在前面。
+  ///
+  /// 返回的候选可能重复，去重与条数上限由 [AppSyncResponse.build] 统一执行。
+  List<SeenNotice> _mergeSeenNotices({
+    required List<SeenNotice> previous,
+    required List<InboxMessage> listed,
+    required Map<String, SeenNotice> parsed,
+  }) {
+    final previousById = {for (final notice in previous) notice.id: notice};
+    final merged = <SeenNotice>[];
+    for (final message in listed) {
+      final identity = message.identity;
+      if (identity.isEmpty) {
+        continue;
+      }
+      merged.add(
+        _preferParsedNotice(
+          parsed[identity],
+          previousById[identity],
+          identity,
+        ),
+      );
+    }
+    return merged..addAll(previous);
   }
 
   Future<AuthCheckResult> checkAuth(String cookie) async {
@@ -561,7 +624,7 @@ class LocalSyncRunner {
     required InboxMessage message,
     required String cookie,
   }) async {
-    final id = message.uuid ?? message.id;
+    final id = message.identity;
     final sendTag = message.sendTag ?? 0;
     final url = '$_noticeOrigin/pc/notice/$id/getNoticeDetail?sendTag=$sendTag';
     final response = await _getWithCookie(
@@ -1086,6 +1149,22 @@ class LocalSyncRunner {
       }
     }
   }
+}
+
+/// 已解析的记录优先保留，避免一次失败把已经解析过的通知降级成未解析，
+/// 从而让它下一轮又被重抓一遍详情。
+SeenNotice _preferParsedNotice(
+  SeenNotice? fresh,
+  SeenNotice? known,
+  String identity,
+) {
+  if (fresh != null && fresh.detailParsed) {
+    return fresh;
+  }
+  if (known != null && known.detailParsed) {
+    return known;
+  }
+  return fresh ?? known ?? SeenNotice(id: identity);
 }
 
 void _ensureTrustedCookieTarget(Uri uri) {

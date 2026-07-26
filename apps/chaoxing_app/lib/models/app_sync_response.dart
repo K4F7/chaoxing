@@ -88,6 +88,45 @@ class SyncStats {
   };
 }
 
+/// 已见通知：在过去某一轮同步的通知列表里出现过的通知。
+///
+/// 通知一旦发出内容就不再变化，所以详情解析成功的通知会把正文与任务入口链接
+/// 一并记下（[detailParsed] 为真），后续同步直接复用，不再请求它的详情页。
+/// 只是在列表里露过面、或详情抓取失败的通知，[detailParsed] 保持为假，下一轮
+/// 照常重试——否则一次失败会被永久记成「已解析」，那条通知的待办就再也进不来。
+class SeenNotice {
+  const SeenNotice({
+    required this.id,
+    this.detailParsed = false,
+    this.content,
+    this.taskLinks = const [],
+  });
+
+  final String id;
+  final bool detailParsed;
+  final String? content;
+  final List<String> taskLinks;
+
+  factory SeenNotice.fromJson(Map<String, dynamic> json) {
+    final rawLinks = json['taskLinks'];
+    return SeenNotice(
+      id: json.readString('id'),
+      detailParsed: json['detailParsed'] == true,
+      content: json.readNullableString('content'),
+      taskLinks: rawLinks is List
+          ? rawLinks.whereType<String>().where((link) => link.isNotEmpty).toList()
+          : const [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'detailParsed': detailParsed,
+    if (content != null) 'content': content,
+    'taskLinks': taskLinks,
+  };
+}
+
 class AppSyncResponse {
   const AppSyncResponse({
     required this.lastSyncedAt,
@@ -95,6 +134,7 @@ class AppSyncResponse {
     required this.items,
     required this.failures,
     this.stats = const SyncStats(),
+    this.seenNotices = const [],
   });
 
   final DateTime? lastSyncedAt;
@@ -102,6 +142,10 @@ class AppSyncResponse {
   final List<SyncItem> items;
   final List<AppSyncFailure> failures;
   final SyncStats stats;
+
+  /// 已见通知，最近出现的排在前面。首轮运行或缓存被清空时为空，那一轮所有通知
+  /// 都会照常抓取详情。
+  final List<SeenNotice> seenNotices;
 
   bool get rateLimited => failures.any((failure) {
     final message = failure.message.toLowerCase();
@@ -136,6 +180,7 @@ class AppSyncResponse {
       stats: json['stats'] is Map
           ? SyncStats.fromJson((json['stats'] as Map).cast<String, dynamic>())
           : const SyncStats(),
+      seenNotices: _readSeenNotices(json['seenNotices']),
     );
   }
 
@@ -146,6 +191,7 @@ class AppSyncResponse {
     required List<AppSyncFailure> failures,
     String authStatus = 'ok',
     SyncStats stats = const SyncStats(),
+    List<SeenNotice> seenNotices = const [],
   }) {
     final enriched =
         _mergeItems(items).map((item) => _buildAppSyncItem(item, now)).toList()
@@ -163,6 +209,7 @@ class AppSyncResponse {
       items: enriched,
       stats: stats,
       failures: sanitizedFailures,
+      seenNotices: _boundSeenNotices(seenNotices),
     );
   }
 
@@ -173,8 +220,39 @@ class AppSyncResponse {
       'items': items.map((item) => item.toJson()).toList(),
       'failures': failures.map((failure) => failure.toJson()).toList(),
       'stats': stats.toJson(),
+      'seenNotices': seenNotices.map((notice) => notice.toJson()).toList(),
     };
   }
+}
+
+/// 已见通知的条数上限，与收件箱单轮抓取条数的上限一致：一轮同步见到的通知永远
+/// 记得下，更早的按最近优先淘汰。淘汰只会让那条通知下次重新抓一遍详情，不会让
+/// 它的待办消失。
+const maxSeenNotices = 500;
+
+List<SeenNotice> _boundSeenNotices(List<SeenNotice> notices) {
+  final bounded = <String, SeenNotice>{};
+  for (final notice in notices) {
+    if (notice.id.isEmpty || bounded.length >= maxSeenNotices) {
+      continue;
+    }
+    bounded.putIfAbsent(notice.id, () => notice);
+  }
+  return bounded.values.toList();
+}
+
+List<SeenNotice> _readSeenNotices(Object? raw) {
+  if (raw is! List) {
+    return const [];
+  }
+  return _boundSeenNotices(
+    raw
+        .whereType<Map>()
+        .map(
+          (notice) => SeenNotice.fromJson(notice.cast<String, dynamic>()),
+        )
+        .toList(),
+  );
 }
 
 List<SyncItem> _mergeItems(List<SyncItem> items) {

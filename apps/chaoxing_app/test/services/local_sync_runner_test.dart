@@ -682,6 +682,179 @@ void main() {
     expect(response.failures, isEmpty);
   });
 
+  group('notice detail reuse', () {
+    /// Serves an inbox whose listing is driven by [listedNotices], so a second
+    /// sync can present a mix of already-parsed and brand new notices.
+    MockClient noticeClient({
+      required List<String> Function() listedNotices,
+      required List<String> calls,
+      String noticeContent = '作业安排',
+      Set<String> Function()? failingDetails,
+    }) {
+      return MockClient((request) async {
+        final url = request.url.toString();
+        calls.add('${request.method} $url');
+
+        if (url.startsWith('https://i.chaoxing.com/base')) {
+          return http.Response(
+            '个人空间 https://notice.chaoxing.com/pc/notice/myNotice?s=reuse',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+        if (url.startsWith('https://notice.chaoxing.com/pc/notice/myNotice')) {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+        if (request.method == 'POST' &&
+            url == 'https://notice.chaoxing.com/pc/notice/getNoticeList') {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'notices': {
+                'list': [
+                  for (final id in listedNotices())
+                    {
+                      'id': id,
+                      'title': '作业通知 $id',
+                      'sendTime': '2026-06-01 08:00:00',
+                      'sendTag': 0,
+                    },
+                ],
+                'lastPage': true,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        final detail = RegExp(
+          r'/pc/notice/([^/]+)/getNoticeDetail',
+        ).firstMatch(url);
+        if (detail != null) {
+          final id = detail.group(1)!;
+          if (failingDetails?.call().contains(id) ?? false) {
+            return http.Response('detail unavailable', 500);
+          }
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'msg': {
+                'content': noticeContent,
+                'rtf_content':
+                    'https://mooc1.chaoxing.com/work?workOrExam=work&workId=$id',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (url.startsWith('https://mooc1.chaoxing.com/work?')) {
+          final id = request.url.queryParameters['workId']!;
+          return http.Response(
+            '<title>作业作答</title><input id="workId" value="$id" />',
+            200,
+            headers: {'content-type': 'text/html; charset=utf-8'},
+          );
+        }
+        return http.Response('not found', 404);
+      });
+    }
+
+    const config = AppConfig(
+      cookie: 'UID=1',
+      inboxPageLimit: 1,
+      inboxItemLimit: 20,
+      refreshMinutes: 60,
+      remindersEnabled: true,
+      courseSourcesEnabled: false,
+    );
+
+    test('skips detail requests for notices parsed by an earlier sync', () async {
+      final calls = <String>[];
+      var listed = ['notice-1'];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: noticeClient(listedNotices: () => listed, calls: calls),
+      );
+
+      final first = await runner.run(config);
+      expect(
+        calls.where((call) => call.contains('notice-1/getNoticeDetail')),
+        hasLength(1),
+      );
+
+      listed = ['notice-2', 'notice-1'];
+      calls.clear();
+      final second = await runner.run(config, previous: first);
+
+      expect(
+        calls.where((call) => call.contains('notice-1/getNoticeDetail')),
+        isEmpty,
+      );
+      expect(
+        calls.where((call) => call.contains('notice-2/getNoticeDetail')),
+        hasLength(1),
+      );
+      expect(second.stats.detailSummaries, 2);
+      expect(second.failures, isEmpty);
+      expect(second.items.map((item) => item.id), [
+        'assignment-notice-1',
+        'assignment-notice-2',
+      ]);
+      expect(
+        calls.where((call) => call.contains('mooc1.chaoxing.com/work')),
+        hasLength(2),
+      );
+    });
+
+    test('reuse keeps a deadline that only the notice body carries', () async {
+      final calls = <String>[];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: noticeClient(
+          listedNotices: () => ['notice-1'],
+          calls: calls,
+          noticeContent: '开始时间：06-18 08:00\n结束时间：06-20 23:59',
+        ),
+      );
+
+      final first = await runner.run(config);
+      final second = await runner.run(config, previous: first);
+
+      expect(first.items.single.dueAt, isNotNull);
+      expect(second.items.single.dueAt, first.items.single.dueAt);
+      expect(second.items.single.startAt, first.items.single.startAt);
+    });
+
+    test('retries a notice whose detail fetch failed', () async {
+      final calls = <String>[];
+      var failing = {'notice-1'};
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: noticeClient(
+          listedNotices: () => ['notice-1'],
+          calls: calls,
+          failingDetails: () => failing,
+        ),
+      );
+
+      final first = await runner.run(config);
+      expect(first.failures, hasLength(1));
+      expect(first.items, isEmpty);
+
+      failing = {};
+      calls.clear();
+      final second = await runner.run(config, previous: first);
+
+      expect(
+        calls.where((call) => call.contains('notice-1/getNoticeDetail')),
+        hasLength(1),
+      );
+      expect(second.failures, isEmpty);
+      expect(second.items.map((item) => item.id), ['assignment-notice-1']);
+    });
+  });
+
   test('blames the auth phase when the shared home page fails', () async {
     final calls = <String>[];
     final runner = LocalSyncRunner(

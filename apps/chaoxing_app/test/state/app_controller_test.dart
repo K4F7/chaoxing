@@ -690,6 +690,47 @@ void main() {
     expect(controller.config.cookie, isEmpty);
   });
 
+  test('hands the cached seen notices to the next sync', () async {
+    final cached = AppSyncResponse(
+      lastSyncedAt: DateTime(2026, 6, 5, 8),
+      authStatus: 'ok',
+      items: responseWithTitle('缓存作业').items,
+      failures: const [],
+      seenNotices: const [
+        SeenNotice(
+          id: 'notice-1',
+          detailParsed: true,
+          taskLinks: ['https://mooc1.chaoxing.com/work?workId=1'],
+        ),
+      ],
+    );
+    AppSyncResponse? handedPrevious;
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 3,
+          inboxItemLimit: 60,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+        cachedSync: cached,
+      ),
+      fetcher: (_, {previous}) async {
+        handedPrevious = previous;
+        return responseWithTitle('最新作业');
+      },
+    );
+    addTearDown(controller.dispose);
+
+    await controller.load();
+
+    expect(handedPrevious?.seenNotices.single.id, 'notice-1');
+    expect(handedPrevious?.seenNotices.single.taskLinks, [
+      'https://mooc1.chaoxing.com/work?workId=1',
+    ]);
+  });
+
   test('rejects newline cookie injection before auth or storage', () async {
     var authCalls = 0;
     final storage = MemoryAppStorage();

@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/app_config.dart';
+import '../models/course_catalog.dart';
 import '../services/local_sync_runner.dart';
 
 typedef ConfigSaver = Future<void> Function(AppConfig config);
 typedef NotificationTester = Future<bool> Function(bool showDetails);
 typedef VersionLabelLoader = Future<String> Function();
+typedef CourseMonitoringChanged =
+    Future<void> Function(String courseKey, bool monitored);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -14,6 +17,9 @@ class SettingsScreen extends StatefulWidget {
     required this.onSave,
     this.onOpenLogin,
     this.onTestNotification,
+    this.courseCatalog = CourseCatalog.empty,
+    this.onCourseMonitoringChanged,
+    this.onRefreshCourses,
     this.versionLabelLoader = _loadVersionLabel,
     super.key,
   });
@@ -22,6 +28,9 @@ class SettingsScreen extends StatefulWidget {
   final ConfigSaver onSave;
   final VoidCallback? onOpenLogin;
   final NotificationTester? onTestNotification;
+  final CourseCatalog courseCatalog;
+  final CourseMonitoringChanged? onCourseMonitoringChanged;
+  final Future<void> Function()? onRefreshCourses;
   final VersionLabelLoader versionLabelLoader;
 
   @override
@@ -37,10 +46,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _remindersEnabled;
   late bool _showNotificationDetails;
   late bool _courseSourcesEnabled;
+  late CourseCatalog _courseCatalog;
   late final Future<String> _versionLabel;
   bool _clearSavedCookie = false;
   bool _saving = false;
   bool _testingNotification = false;
+  bool _refreshingCourses = false;
 
   @override
   void initState() {
@@ -59,6 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _remindersEnabled = widget.initialConfig.remindersEnabled;
     _showNotificationDetails = widget.initialConfig.showNotificationDetails;
     _courseSourcesEnabled = widget.initialConfig.courseSourcesEnabled;
+    _courseCatalog = widget.courseCatalog;
     _versionLabel = widget.versionLabelLoader();
   }
 
@@ -184,6 +196,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 12),
+            Text(
+              '已监控 ${_courseCatalog.monitoredCourses.length} / '
+              '${_courseCatalog.courses.length} 门课程',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (widget.onRefreshCourses != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _refreshingCourses
+                      ? null
+                      : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          setState(() => _refreshingCourses = true);
+                          try {
+                            await widget.onRefreshCourses!();
+                            if (mounted) {
+                              messenger.showSnackBar(
+                                const SnackBar(content: Text('课程列表已刷新')),
+                              );
+                            }
+                          } catch (_) {
+                            if (mounted) {
+                              messenger.showSnackBar(
+                                const SnackBar(content: Text('课程列表刷新失败')),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() => _refreshingCourses = false);
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.refresh),
+                  label: Text(_refreshingCourses ? '刷新中' : '刷新课程列表'),
+                ),
+              ),
+            for (final preference in _courseCatalog.courses)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(preference.course.title),
+                subtitle: Text(
+                  '课程 ${preference.course.courseId} · '
+                  '班级 ${preference.course.classId}',
+                ),
+                value: preference.monitored,
+                onChanged: widget.onCourseMonitoringChanged == null
+                    ? null
+                    : (value) async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await widget.onCourseMonitoringChanged!(
+                            preference.course.key,
+                            value,
+                          );
+                          if (mounted) {
+                            setState(() {
+                              _courseCatalog = _courseCatalog.setMonitored(
+                                preference.course.key,
+                                value,
+                              );
+                            });
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              const SnackBar(content: Text('课程监控设置保存失败')),
+                            );
+                          }
+                        }
+                      },
+              ),
           ],
           const SizedBox(height: 14),
           SwitchListTile(

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/app_config.dart';
 import '../models/app_sync_response.dart';
+import '../models/course_catalog.dart';
 import '../models/sync_item.dart';
 import '../services/app_storage.dart';
 import '../services/chaoxing_cookie_store.dart';
@@ -40,6 +41,9 @@ class AppController extends ChangeNotifier {
             config,
             previous: previous,
             onProgress: _handleSyncProgress,
+            courseCatalog: _courseCatalog,
+            forceCourseDiscovery: _forceCourseDiscovery,
+            onCourseCatalogChanged: _saveDiscoveredCourseCatalog,
           ),
         );
     _authenticator =
@@ -63,11 +67,13 @@ class AppController extends ChangeNotifier {
   DateTime? _rateLimitBackoffUntil;
   bool _refreshQueued = false;
   bool _queuedRefreshIsSilent = true;
+  bool _forceCourseDiscovery = false;
   bool _disposed = false;
   final Set<LocalSyncRunner> _activeLocalRunners = {};
 
   AppConfig _config = AppConfig.empty;
   AppSyncResponse? _sync;
+  CourseCatalog _courseCatalog = CourseCatalog.empty;
   bool _loading = true;
   bool _refreshing = false;
   SyncProgress? _syncProgress;
@@ -76,6 +82,10 @@ class AppController extends ChangeNotifier {
   AppConfig get config => _config;
 
   AppSyncResponse? get sync => _sync;
+
+  CourseCatalog get courseCatalog => _courseCatalog;
+
+  int get monitoredCourseCount => _courseCatalog.monitoredCourses.length;
 
   bool get loading => _loading;
 
@@ -117,6 +127,7 @@ class AppController extends ChangeNotifier {
     try {
       final loadedConfig = await _storage.loadConfig();
       final loadedSync = await _storage.loadCachedSync();
+      final loadedCourseCatalog = await _storage.loadCourseCatalog();
       await _serializeStorageMutation(() async {
         if (_disposed ||
             generation != _loadGeneration ||
@@ -139,6 +150,7 @@ class AppController extends ChangeNotifier {
             ? normalizedConfig.copyWith(cookie: '')
             : normalizedConfig;
         _sync = loadedSync;
+        _courseCatalog = loadedCourseCatalog;
         _restoreRefreshGuardsFromCache(loadedSync);
         _error = unsafeCookie ? '本地 Cookie 格式不安全，已忽略，请重新登录' : null;
         _configRevision += 1;
@@ -246,6 +258,28 @@ class AppController extends ChangeNotifier {
       }
       _applyConfig(updated, scheduleRefresh: false);
     });
+  }
+
+  Future<void> setCourseMonitored(String courseKey, bool monitored) async {
+    await _serializeStorageMutation(() async {
+      final updated = _courseCatalog.setMonitored(courseKey, monitored);
+      await _storage.saveCourseCatalog(updated);
+      if (_disposed) {
+        return;
+      }
+      _courseCatalog = updated;
+      _notifyListeners();
+    });
+  }
+
+  Future<void> refreshCourses() async {
+    _forceCourseDiscovery = true;
+    _lastAcceptedRefreshAt = null;
+    try {
+      await refresh();
+    } finally {
+      _forceCourseDiscovery = false;
+    }
   }
 
   Future<bool> sendTestNotification(bool showDetails) {
@@ -400,6 +434,15 @@ class AppController extends ChangeNotifier {
       return;
     }
     _syncProgress = progress;
+    _notifyListeners();
+  }
+
+  Future<void> _saveDiscoveredCourseCatalog(CourseCatalog catalog) async {
+    await _storage.saveCourseCatalog(catalog);
+    if (_disposed) {
+      return;
+    }
+    _courseCatalog = catalog;
     _notifyListeners();
   }
 

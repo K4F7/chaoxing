@@ -97,6 +97,9 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => SettingsScreen(
           initialConfig: widget.controller.config,
           onSave: widget.controller.saveConfig,
+          courseCatalog: widget.controller.courseCatalog,
+          onCourseMonitoringChanged: widget.controller.setCourseMonitored,
+          onRefreshCourses: widget.controller.refreshCourses,
           onTestNotification: Platform.isWindows
               ? widget.controller.sendTestNotification
               : null,

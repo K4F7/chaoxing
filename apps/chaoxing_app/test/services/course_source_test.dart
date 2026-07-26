@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:chaoxing_app/models/app_config.dart';
+import 'package:chaoxing_app/models/course_catalog.dart';
 import 'package:chaoxing_app/services/chaoxing_cookie_store.dart';
 import 'package:chaoxing_app/services/local_sync_runner.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -217,6 +218,79 @@ void main() {
     expect(response.stats.courseTaskLinksDiscovered, 0);
     expect(response.failures, hasLength(1));
     expect(activeLists, 0);
+  });
+
+  test('sync scans only monitored courses without rediscovery', () async {
+    final calls = <String>[];
+    final runner = LocalSyncRunner(
+      clock: () => DateTime(2026, 7, 27, 10),
+      client: MockClient((request) async {
+        calls.add('${request.method} ${request.url}');
+        if (request.url.host == 'i.chaoxing.com') {
+          return http.Response(
+            'https://notice.chaoxing.com/pc/notice/myNotice?s=monitored',
+            200,
+          );
+        }
+        if (request.url.host == 'notice.chaoxing.com' &&
+            request.url.path == '/pc/notice/myNotice') {
+          return http.Response("window.nowYear='2026';", 200);
+        }
+        if (request.url.path == '/pc/notice/getNoticeList') {
+          return http.Response(
+            jsonEncode({
+              'status': true,
+              'notices': {'list': <Object>[], 'lastPage': true},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/work/task-list' ||
+            request.url.path == '/mooc-ans/exam/phone/task-list') {
+          return http.Response('<ul></ul>', 200);
+        }
+        return http.Response('unexpected', 500);
+      }),
+    );
+    final catalog = CourseCatalog(
+      lastDiscoveredAt: DateTime(2026, 7, 27, 9),
+      courses: const [
+        CoursePreference(
+          course: CourseSpace(
+            courseId: 'monitored',
+            classId: '1',
+            cpi: '1',
+            title: '受监控课程',
+          ),
+        ),
+        CoursePreference(
+          course: CourseSpace(
+            courseId: 'ignored',
+            classId: '2',
+            cpi: '2',
+            title: '已取消课程',
+          ),
+          monitored: false,
+        ),
+      ],
+    );
+
+    await runner.run(
+      const AppConfig(
+        cookie: 'UID=1',
+        inboxPageLimit: 1,
+        inboxItemLimit: 20,
+        refreshMinutes: 60,
+        remindersEnabled: true,
+      ),
+      courseCatalog: catalog,
+    );
+
+    expect(calls, isNot(anyElement(contains('/visit/interaction'))));
+    final taskCalls = calls.where((call) => call.contains('task-list'));
+    expect(taskCalls, hasLength(2));
+    expect(taskCalls, everyElement(contains('courseId=monitored')));
+    expect(taskCalls, isNot(anyElement(contains('courseId=ignored'))));
   });
 
   test('falls back to legacy course endpoint when current html fails', () async {

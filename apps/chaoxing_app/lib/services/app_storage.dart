@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_config.dart';
 import '../models/app_sync_response.dart';
+import '../models/course_catalog.dart';
 import 'reminder_service.dart';
 
 abstract class AppStorage {
@@ -19,6 +20,10 @@ abstract class AppStorage {
   Future<void> saveCachedSync(AppSyncResponse response);
 
   Future<void> clearCachedSync();
+
+  Future<CourseCatalog> loadCourseCatalog();
+
+  Future<void> saveCourseCatalog(CourseCatalog catalog);
 
   Future<ReminderHistory> loadReminderHistory();
 
@@ -46,6 +51,7 @@ class DeviceAppStorage implements AppStorage {
   static const _courseLimitKey = 'course_limit';
   static const _cachedSyncKey = 'cached_app_sync';
   static const _reminderHistoryKey = 'reminder_history';
+  static const _courseCatalogKey = 'course_catalog';
 
   final FlutterSecureStorage _secureStorage;
   final DateTime Function() _clock;
@@ -152,6 +158,30 @@ class DeviceAppStorage implements AppStorage {
   }
 
   @override
+  Future<CourseCatalog> loadCourseCatalog() async {
+    final prefs = await _prefs();
+    final raw = prefs.getString(_courseCatalogKey);
+    if (raw == null || raw.isEmpty) {
+      return CourseCatalog.empty;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map<String, dynamic>
+          ? CourseCatalog.fromJson(decoded)
+          : CourseCatalog.empty;
+    } catch (_) {
+      await prefs.remove(_courseCatalogKey);
+      return CourseCatalog.empty;
+    }
+  }
+
+  @override
+  Future<void> saveCourseCatalog(CourseCatalog catalog) async {
+    final prefs = await _prefs();
+    await prefs.setString(_courseCatalogKey, jsonEncode(catalog.toJson()));
+  }
+
+  @override
   Future<ReminderHistory> loadReminderHistory() async {
     final prefs = await _prefs();
     final raw = prefs.getString(_reminderHistoryKey);
@@ -188,11 +218,13 @@ class MemoryAppStorage implements AppStorage {
   AppConfig config;
   AppSyncResponse? cachedSync;
   ReminderHistory reminderHistory;
+  CourseCatalog courseCatalog;
 
   MemoryAppStorage({
     this.config = AppConfig.empty,
     this.cachedSync,
     this.reminderHistory = const ReminderHistory.empty(),
+    this.courseCatalog = CourseCatalog.empty,
   });
 
   @override
@@ -219,6 +251,14 @@ class MemoryAppStorage implements AppStorage {
   @override
   Future<void> clearCachedSync() async {
     cachedSync = null;
+  }
+
+  @override
+  Future<CourseCatalog> loadCourseCatalog() async => courseCatalog;
+
+  @override
+  Future<void> saveCourseCatalog(CourseCatalog catalog) async {
+    courseCatalog = catalog;
   }
 
   @override

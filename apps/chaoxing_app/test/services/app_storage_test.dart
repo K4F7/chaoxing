@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:chaoxing_app/models/app_config.dart';
 import 'package:chaoxing_app/models/app_sync_response.dart';
+import 'package:chaoxing_app/models/course_catalog.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -233,6 +234,31 @@ void main() {
     expect(restored?.seenNotices.single.id, 'notice-1');
     expect(restored?.seenNotices.single.detailParsed, isTrue);
     expect(restored?.seenNotices.single.sendTag, 7);
+  });
+
+  test('persists monitored courses and their discovery date', () async {
+    final storage = DeviceAppStorage();
+    final catalog = CourseCatalog(
+      lastDiscoveredAt: DateTime(2026, 7, 27, 9),
+      courses: const [
+        CoursePreference(
+          course: CourseSpace(
+            courseId: '101',
+            classId: '201',
+            cpi: '301',
+            title: '线性代数',
+          ),
+          monitored: false,
+        ),
+      ],
+    );
+
+    await storage.saveCourseCatalog(catalog);
+    final restored = await DeviceAppStorage().loadCourseCatalog();
+
+    expect(restored.lastDiscoveredAt, DateTime(2026, 7, 27, 9));
+    expect(restored.courses.single.course.title, '线性代数');
+    expect(restored.courses.single.monitored, isFalse);
   });
 }
 

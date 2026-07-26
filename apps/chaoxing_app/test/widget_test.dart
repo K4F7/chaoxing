@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:chaoxing_app/main.dart';
 import 'package:chaoxing_app/models/app_config.dart';
 import 'package:chaoxing_app/models/app_sync_response.dart';
+import 'package:chaoxing_app/models/course_catalog.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/screens/settings_screen.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
@@ -12,6 +13,81 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('settings lists monitored courses and updates a selection', (
+    tester,
+  ) async {
+    String? changedKey;
+    bool? changedValue;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          courseCatalog: const CourseCatalog(
+            courses: [
+              CoursePreference(
+                course: CourseSpace(
+                  courseId: '101',
+                  classId: '201',
+                  cpi: '1',
+                  title: '线性代数',
+                ),
+              ),
+              CoursePreference(
+                course: CourseSpace(
+                  courseId: '102',
+                  classId: '202',
+                  cpi: '2',
+                  title: '大学物理',
+                ),
+                monitored: false,
+              ),
+            ],
+          ),
+          onCourseMonitoringChanged: (key, monitored) async {
+            changedKey = key;
+            changedValue = monitored;
+          },
+        ),
+      ),
+    );
+
+    expect(find.text('已监控 1 / 2 门课程'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('线性代数'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.widgetWithText(SwitchListTile, '线性代数'));
+    await tester.pump();
+
+    expect(changedKey, '101:201');
+    expect(changedValue, isFalse);
+  });
+
+  testWidgets('settings can refresh the course list on demand', (tester) async {
+    var refreshes = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          onRefreshCourses: () async => refreshes += 1,
+        ),
+      ),
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('刷新课程列表'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('刷新课程列表'));
+    await tester.pump();
+
+    expect(refreshes, 1);
+  });
+
   testWidgets('shows setup screen when no cookie config exists', (
     tester,
   ) async {
@@ -299,7 +375,11 @@ void main() {
     );
 
     final testButton = find.widgetWithText(OutlinedButton, '发送测试通知');
-    await tester.ensureVisible(testButton);
+    await tester.scrollUntilVisible(
+      testButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     await tester.tap(testButton);
     await tester.pumpAndSettle();

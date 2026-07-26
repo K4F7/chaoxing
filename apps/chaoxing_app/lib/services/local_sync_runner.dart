@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/app_config.dart';
 import '../models/app_sync_response.dart';
+import '../models/course_catalog.dart';
 import '../models/sync_item.dart';
 import '../utils/redaction.dart';
 import 'chaoxing_cookie_store.dart';
@@ -82,6 +83,7 @@ class SyncProgress {
 }
 
 typedef SyncProgressCallback = void Function(SyncProgress progress);
+typedef CourseCatalogChanged = Future<void> Function(CourseCatalog catalog);
 
 class InboxFetchResult {
   const InboxFetchResult({
@@ -178,20 +180,6 @@ class AssignmentRequirement {
   final String source;
 }
 
-class CourseSpace {
-  const CourseSpace({
-    required this.courseId,
-    required this.classId,
-    required this.cpi,
-    required this.title,
-  });
-
-  final String courseId;
-  final String classId;
-  final String cpi;
-  final String title;
-}
-
 class CourseTaskLink {
   const CourseTaskLink({
     required this.url,
@@ -276,6 +264,9 @@ class LocalSyncRunner {
     AppConfig config, {
     AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
+    CourseCatalog courseCatalog = CourseCatalog.empty,
+    bool forceCourseDiscovery = false,
+    CourseCatalogChanged? onCourseCatalogChanged,
   }) async {
     final syncStopwatch = Stopwatch()..start();
     var authenticationMs = 0;
@@ -478,6 +469,9 @@ class LocalSyncRunner {
         failures: failures,
         home: home,
         onProgress: onProgress,
+        catalog: courseCatalog,
+        forceDiscovery: forceCourseDiscovery,
+        onCatalogChanged: onCourseCatalogChanged,
       );
     }
     coursesMs = syncStopwatch.elapsedMilliseconds - phaseStartedAt;
@@ -780,34 +774,53 @@ class LocalSyncRunner {
     required int itemLimit,
     required List<SyncItem> items,
     required List<AppSyncFailure> failures,
+    required CourseCatalog catalog,
+    required bool forceDiscovery,
     _HomePage? home,
     SyncProgressCallback? onProgress,
+    CourseCatalogChanged? onCatalogChanged,
   }) async {
     onProgress?.call(const SyncProgress(phase: SyncPhase.courses));
-    List<CourseSpace> courses;
-    var courseCookie = cookie;
-    try {
-      final discovery = await _fetchCourseDiscovery(cookie, home: home);
-      courses = discovery.courses;
-      courseCookie = discovery.cookie;
-    } catch (error) {
-      failures.add(
-        AppSyncFailure(
-          entryUrl: _modernCourseListUrl,
-          sourceTitle: '课程空间',
-          message: error is LocalSyncException
-              ? redactSensitiveText(
-                  error.message,
-                  secrets: chaoxingCookieSecrets(cookie),
-                )
-              : '课程列表解析失败',
-        ),
-      );
-      return const _CourseSourceStats();
+    var activeCatalog = catalog;
+    var courseCookie = home?.cookie ?? cookie;
+    final today = _clock();
+    final lastDiscoveredAt = catalog.lastDiscoveredAt;
+    final shouldDiscover =
+        forceDiscovery ||
+        !catalog.hasRecords ||
+        lastDiscoveredAt == null ||
+        !_isSameLocalDate(lastDiscoveredAt, today);
+    if (shouldDiscover) {
+      try {
+        final discovery = await _fetchCourseDiscovery(cookie, home: home);
+        activeCatalog = catalog.mergeDiscovered(
+          discovery.courses,
+          discoveredAt: today,
+        );
+        courseCookie = discovery.cookie;
+        await onCatalogChanged?.call(activeCatalog);
+      } catch (error) {
+        failures.add(
+          AppSyncFailure(
+            entryUrl: _modernCourseListUrl,
+            sourceTitle: '课程空间',
+            message: error is LocalSyncException
+                ? redactSensitiveText(
+                    error.message,
+                    secrets: chaoxingCookieSecrets(cookie),
+                  )
+                : '课程列表解析失败',
+          ),
+        );
+        if (!catalog.hasRecords) {
+          return const _CourseSourceStats();
+        }
+      }
     }
 
     final normalizedCourseLimit = _normalizeLimit(courseLimit, 20, 100);
     final normalizedItemLimit = _normalizeLimit(itemLimit, 60, 500);
+    final courses = activeCatalog.monitoredCourses;
     final scannedCourses = courses.take(normalizedCourseLimit).length;
     final coursesToScan = courses.take(normalizedCourseLimit).toList();
     onProgress?.call(
@@ -2269,6 +2282,14 @@ int _normalizeLimit(int value, int fallback, int maximum) {
     return fallback;
   }
   return value > maximum ? maximum : value;
+}
+
+bool _isSameLocalDate(DateTime left, DateTime right) {
+  final localLeft = left.toLocal();
+  final localRight = right.toLocal();
+  return localLeft.year == localRight.year &&
+      localLeft.month == localRight.month &&
+      localLeft.day == localRight.day;
 }
 
 Future<void> _forEachConcurrent<T>(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:chaoxing_app/models/app_config.dart';
 import 'package:chaoxing_app/models/app_sync_response.dart';
+import 'package:chaoxing_app/models/course_catalog.dart';
 import 'package:chaoxing_app/models/sync_item.dart';
 import 'package:chaoxing_app/services/app_storage.dart';
 import 'package:chaoxing_app/services/local_sync_runner.dart';
@@ -9,6 +10,70 @@ import 'package:chaoxing_app/state/app_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('loads and updates monitored course selections', () async {
+    final storage = MemoryAppStorage(
+      courseCatalog: const CourseCatalog(
+        courses: [
+          CoursePreference(
+            course: CourseSpace(
+              courseId: '101',
+              classId: '201',
+              cpi: '301',
+              title: '线性代数',
+            ),
+          ),
+        ],
+      ),
+    );
+    final controller = AppController(storage);
+    addTearDown(controller.dispose);
+
+    await controller.load();
+    expect(controller.monitoredCourseCount, 1);
+
+    await controller.setCourseMonitored('101:201', false);
+
+    expect(controller.monitoredCourseCount, 0);
+    expect(storage.courseCatalog.courses.single.monitored, isFalse);
+  });
+
+  test('manual course refresh forces discovery', () async {
+    final now = DateTime(2026, 7, 27, 10);
+    final runner = _CourseDiscoveryTrackingRunner(
+      AppSyncResponse(
+        lastSyncedAt: now,
+        authStatus: 'ok',
+        items: const [],
+        failures: const [],
+      ),
+    );
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=1',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+        cachedSync: AppSyncResponse(
+          lastSyncedAt: now,
+          authStatus: 'ok',
+          items: const [],
+          failures: const [],
+        ),
+      ),
+      clock: () => now,
+      runnerFactory: () => runner,
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    await controller.refreshCourses();
+
+    expect(runner.forceDiscoveryValues, [true]);
+  });
+
   test('loads cached sync before refreshing configured accounts', () async {
     final cached = responseWithTitle('缓存作业');
     final fresh = responseWithTitle('最新作业');
@@ -22,7 +87,10 @@ void main() {
       ),
       cachedSync: cached,
     );
-    final controller = AppController(storage, fetcher: (_, {previous}) async => fresh);
+    final controller = AppController(
+      storage,
+      fetcher: (_, {previous}) async => fresh,
+    );
     addTearDown(controller.dispose);
 
     await controller.load();
@@ -776,6 +844,9 @@ class _CloseTrackingRunner extends LocalSyncRunner {
     AppConfig config, {
     AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
+    CourseCatalog courseCatalog = CourseCatalog.empty,
+    bool forceCourseDiscovery = false,
+    CourseCatalogChanged? onCourseCatalogChanged,
   }) => _result.future;
 
   @override
@@ -798,10 +869,33 @@ class _ImmediateRunner extends LocalSyncRunner {
     AppConfig config, {
     AppSyncResponse? previous,
     SyncProgressCallback? onProgress,
+    CourseCatalog courseCatalog = CourseCatalog.empty,
+    bool forceCourseDiscovery = false,
+    CourseCatalogChanged? onCourseCatalogChanged,
   }) async => response;
 
   @override
   void close() => closed = true;
+}
+
+class _CourseDiscoveryTrackingRunner extends LocalSyncRunner {
+  _CourseDiscoveryTrackingRunner(this.response);
+
+  final AppSyncResponse response;
+  final List<bool> forceDiscoveryValues = [];
+
+  @override
+  Future<AppSyncResponse> run(
+    AppConfig config, {
+    AppSyncResponse? previous,
+    SyncProgressCallback? onProgress,
+    CourseCatalog courseCatalog = CourseCatalog.empty,
+    bool forceCourseDiscovery = false,
+    CourseCatalogChanged? onCourseCatalogChanged,
+  }) async {
+    forceDiscoveryValues.add(forceCourseDiscovery);
+    return response;
+  }
 }
 
 class _LoadFailingAppStorage extends MemoryAppStorage {

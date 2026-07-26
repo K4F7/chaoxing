@@ -867,6 +867,7 @@ void main() {
       required List<String> calls,
       required List<List<String>> Function() pages,
       Set<String> Function()? failingDetails,
+      String Function(String id)? titleFor,
     }) {
       return MockClient((request) async {
         final url = request.url.toString();
@@ -898,7 +899,7 @@ void main() {
                     for (final id in page[index])
                       {
                         'id': id,
-                        'title': '作业通知 $id',
+                        'title': titleFor?.call(id) ?? '作业通知 $id',
                         'sendTime': '2026-06-01 08:00:00',
                         'sendTag': 7,
                       },
@@ -1124,6 +1125,50 @@ void main() {
       expect(second.items.map((item) => item.id), contains('assignment-n2'));
     });
 
+    test('a page limit still retries an unparsed seen notice', () async {
+      final calls = <String>[];
+      var pages = [
+        ['n1'],
+        ['n2'],
+      ];
+      var failingDetails = {'n2'};
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(
+          calls: calls,
+          pages: () => pages,
+          failingDetails: () => failingDetails,
+        ),
+      );
+      const pageLimitedConfig = AppConfig(
+        cookie: 'UID=1',
+        inboxPageLimit: 2,
+        inboxItemLimit: 20,
+        refreshMinutes: 60,
+        remindersEnabled: true,
+        courseSourcesEnabled: false,
+      );
+
+      final first = await runner.run(pageLimitedConfig);
+      expect(first.failures, hasLength(1));
+
+      pages = [
+        ['n3'],
+        ['n4'],
+      ];
+      failingDetails = {};
+      calls.clear();
+      final second = await runner.run(pageLimitedConfig, previous: first);
+
+      expect(noticeListCalls(calls), hasLength(2));
+      expect(
+        calls.where((call) => call.contains('n2/getNoticeDetail?sendTag=7')),
+        hasLength(1),
+      );
+      expect(second.failures, isEmpty);
+      expect(second.items.map((item) => item.id), contains('assignment-n2'));
+    });
+
     test('a failed retry keeps the latest seen notice metadata', () async {
       final calls = <String>[];
       final runner = LocalSyncRunner(
@@ -1149,6 +1194,42 @@ void main() {
       expect(response.failures, hasLength(1));
       expect(response.seenNotices.single.sendTag, 7);
       expect(response.seenNotices.single.title, '作业通知 n2');
+    });
+
+    test('an unrelated seen notice does not consume a carry slot', () async {
+      final calls = <String>[];
+      var pages = [
+        ['noise', 'old2', 'trigger'],
+      ];
+      final runner = LocalSyncRunner(
+        clock: () => DateTime.parse('2026-06-05T09:00:00+08:00'),
+        client: pagingClient(
+          calls: calls,
+          pages: () => pages,
+          titleFor: (id) => id == 'noise' ? '系统公告' : '作业通知 $id',
+        ),
+      );
+      const limitedConfig = AppConfig(
+        cookie: 'UID=1',
+        inboxPageLimit: 1,
+        inboxItemLimit: 3,
+        refreshMinutes: 60,
+        remindersEnabled: true,
+        courseSourcesEnabled: false,
+      );
+      final first = await runner.run(limitedConfig);
+
+      pages = [
+        ['new', 'trigger'],
+      ];
+      calls.clear();
+      final second = await runner.run(limitedConfig, previous: first);
+
+      expect(
+        calls.where((call) => call.contains('noise/getNoticeDetail')),
+        isEmpty,
+      );
+      expect(second.items.map((item) => item.id), contains('assignment-old2'));
     });
   });
 

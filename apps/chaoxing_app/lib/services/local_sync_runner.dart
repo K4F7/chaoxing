@@ -97,8 +97,7 @@ class InboxFetchResult {
   final int totalFetched;
   final List<InboxMessage> messages;
 
-  /// 翻页是因为撞上已见通知而提前停下的，而不是翻到了尽头或页数上限。
-  /// 停下之后的那些页里全是更早的通知，调用方需要自己把它们补回来。
+  /// Whether paging stopped at a seen notice rather than at the end or limit.
   final bool stoppedAtSeenNotice;
 }
 
@@ -125,7 +124,7 @@ class InboxMessage {
   final String? detailUrl;
   final Object? sendTag;
 
-  /// 通知标识：与详情页地址所用的标识一致，用来跨轮同步认出同一条通知。
+  /// Stable notice identity used by the detail URL and across syncs.
   String get identity => uuid ?? id;
 }
 
@@ -330,13 +329,12 @@ class LocalSyncRunner {
     final summaries = <DetailSummary>[];
     final failures = <AppSyncFailure>[];
     final listedNoticesToParse = relevant.take(config.inboxItemLimit).toList();
-    final carriedNotices = inbox.stoppedAtSeenNotice
-        ? _carriedSeenNotices(
-            seen: previous?.seenNotices ?? const [],
-            listed: inbox.messages.map((message) => message.identity).toSet(),
-            limit: config.inboxItemLimit - listedNoticesToParse.length,
-          )
-        : const <SeenNotice>[];
+    final carriedNotices = _carriedSeenNotices(
+      seen: previous?.seenNotices ?? const [],
+      listed: inbox.messages.map((message) => message.identity).toSet(),
+      limit: config.inboxItemLimit - listedNoticesToParse.length,
+      includeParsed: inbox.stoppedAtSeenNotice,
+    );
     final noticesToParse = [
       ...listedNoticesToParse,
       ...carriedNotices
@@ -359,7 +357,7 @@ class LocalSyncRunner {
       final seen = seenNotices[identity];
       try {
         if (seen != null && seen.detailParsed) {
-          // 通知内容发出后不再变化，已解析过的直接复用，跳过这次详情请求。
+          // Parsed seen notices can reuse their immutable detail content.
           summaries.add(
             _summaryFromSeenNotice(
               seen,
@@ -519,26 +517,22 @@ class LocalSyncRunner {
     );
   }
 
-  /// 补回提前终止后没再列出的已见通知。
-  ///
-  /// 提前终止跳过的页里全是更早的通知，它们的任务入口链接已经记在已见通知里。
-  /// 不补回来，这一轮的待办就会凭空少掉几条，而界面上看不出任何异常——三周前
-  /// 那条通知里下个月才截止的作业会安静地消失。任务详情页仍然逐个重取，所以
-  /// 截止时间与提交状态照旧是最新的。
-  ///
-  /// [limit] 让参与本轮的通知总数与不提前终止时一致，避免越攒越多的记录把
-  /// 任务详情阶段越拖越慢。
+  /// Selects unlisted seen notices to carry into this sync without exceeding
+  /// the same notice budget used for freshly listed notices.
   List<SeenNotice> _carriedSeenNotices({
     required List<SeenNotice> seen,
     required Set<String> listed,
     required int limit,
+    required bool includeParsed,
   }) {
     final carried = <SeenNotice>[];
     for (final notice in seen) {
       if (carried.length >= limit) {
         break;
       }
-      if (listed.contains(notice.id)) {
+      if (listed.contains(notice.id) ||
+          (!includeParsed && notice.detailParsed) ||
+          !isAssignmentOrExamRelated(_messageFromSeenNotice(notice))) {
         continue;
       }
       carried.add(notice);
@@ -546,9 +540,8 @@ class LocalSyncRunner {
     return carried;
   }
 
-  /// 汇总本轮之后的已见通知，本轮列表里出现过的排在前面。
-  ///
-  /// 返回的候选可能重复，去重与条数上限由 [AppSyncResponse.build] 统一执行。
+  /// Merges seen notices with this sync's listed records first. The response
+  /// builder applies deduplication and the persisted-history bound.
   List<SeenNotice> _mergeSeenNotices({
     required List<SeenNotice> previous,
     required List<InboxMessage> listed,
@@ -1233,8 +1226,7 @@ class LocalSyncRunner {
   }
 }
 
-/// 已解析的记录优先保留，避免一次失败把已经解析过的通知降级成未解析，
-/// 从而让它下一轮又被重抓一遍详情。
+/// Keeps a parsed record from being downgraded by a later transient failure.
 SeenNotice _preferParsedNotice(
   SeenNotice? fresh,
   SeenNotice? seen,

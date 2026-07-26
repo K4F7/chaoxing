@@ -104,9 +104,9 @@ class SeenNotice {
   final bool detailParsed;
   final Object? sendTag;
 
-  /// 通知标题与发出时间。两者都参与待办的构建——发出时间还用来补全「06-20 23:59」
-  /// 这类不带年份的截止时间，所以记录里必须留着，否则补回来的待办会和原样抓取
-  /// 的不一致。
+  /// Metadata needed to rebuild the same item when this notice is carried into
+  /// a later sync. In particular, [sendTime] supplies the year for deadlines
+  /// such as `06-20 23:59`.
   final String title;
   final String? sendTime;
   final String? content;
@@ -157,8 +157,8 @@ class AppSyncResponse {
   final List<AppSyncFailure> failures;
   final SyncStats stats;
 
-  /// 已见通知，最近出现的排在前面。首轮运行或缓存被清空时为空，那一轮所有通知
-  /// 都会照常抓取详情。
+  /// Seen notices, newest first. Empty on the first sync or after clearing the
+  /// cache.
   final List<SeenNotice> seenNotices;
 
   bool get rateLimited => failures.any((failure) {

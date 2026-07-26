@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "single_instance.h"
 #include "utils.h"
 
 namespace {
@@ -10,16 +11,16 @@ namespace {
 constexpr wchar_t kSingleInstanceMutex[] =
     L"Local\\com.sein.chaoxingapp.single-instance";
 
-void RestoreExistingWindow() {
-  HWND window =
-      ::FindWindowW(nullptr, L"\x5B66\x4E60\x901A\x5F85\x529E");
-  if (window == nullptr) {
-    window = ::FindWindowW(nullptr, L"chaoxing_app");
+void RequestExistingWindowActivation() {
+  const UINT message = GetSingleInstanceActivateMessage();
+  if (message == 0) {
+    return;
   }
-  if (window != nullptr) {
-    ::ShowWindow(window, SW_RESTORE);
-    ::SetForegroundWindow(window);
-  }
+
+  // The second process was launched by the user, so allow the existing process
+  // to take foreground focus when it handles the activation request.
+  ::AllowSetForegroundWindow(ASFW_ANY);
+  ::PostMessageW(HWND_BROADCAST, message, 0, 0);
 }
 
 }  // namespace
@@ -28,7 +29,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   HANDLE single_instance = ::CreateMutexW(nullptr, TRUE, kSingleInstanceMutex);
   if (single_instance != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
-    RestoreExistingWindow();
+    RequestExistingWindowActivation();
     ::CloseHandle(single_instance);
     return EXIT_SUCCESS;
   }

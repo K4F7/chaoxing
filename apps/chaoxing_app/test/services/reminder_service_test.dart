@@ -45,6 +45,25 @@ void main() {
     expect(duplicate, isEmpty);
   });
 
+  test('does not miss tiers after a refresh gap', () {
+    final now = DateTime(2026, 7, 27, 9);
+    final service = const LocalReminderService();
+
+    final low = service.collectPending(
+      items: [syncItem(dueAt: now.add(const Duration(hours: 20)))],
+      history: const ReminderHistory.empty(),
+      now: now,
+    );
+    final high = service.collectPending(
+      items: [syncItem(dueAt: now.add(const Duration(hours: 1)))],
+      history: const ReminderHistory.empty(),
+      now: now,
+    );
+
+    expect(low.single.intensity, ReminderIntensity.low);
+    expect(high.single.intensity, ReminderIntensity.high);
+  });
+
   test(
     'windows notifier initializes and records a delivered reminder',
     () async {

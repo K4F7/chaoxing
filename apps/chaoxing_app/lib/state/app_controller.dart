@@ -238,6 +238,7 @@ class AppController extends ChangeNotifier {
       }
       if (accountChanged) {
         _sync = null;
+        _authenticationState = AuthenticationState.unknown;
       }
       _closeActiveLocalRunners();
       _lastAcceptedRefreshAt = null;

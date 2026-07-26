@@ -135,6 +135,36 @@ void main() {
     },
   );
 
+  test('saving a new cookie recovers from authentication expiry', () async {
+    var fetches = 0;
+    final controller = AppController(
+      MemoryAppStorage(
+        config: const AppConfig(
+          cookie: 'UID=old',
+          inboxPageLimit: 1,
+          inboxItemLimit: 20,
+          refreshMinutes: 60,
+          remindersEnabled: true,
+        ),
+      ),
+      fetcher: (_, {previous}) async {
+        fetches += 1;
+        if (fetches == 1) {
+          throw const AuthenticationExpiredException();
+        }
+        return responseWithTitle('恢复同步');
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.load();
+    expect(controller.authenticationState, AuthenticationState.expired);
+
+    await controller.saveConfig(controller.config.copyWith(cookie: 'UID=new'));
+
+    expect(controller.authenticationState, AuthenticationState.valid);
+    expect(controller.items.single.title, '恢复同步');
+  });
+
   test('loads cached sync before refreshing configured accounts', () async {
     final cached = responseWithTitle('缓存作业');
     final fresh = responseWithTitle('最新作业');

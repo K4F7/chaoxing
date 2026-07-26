@@ -1267,7 +1267,7 @@ void main() {
         isA<LocalSyncException>().having(
           (error) => error.message,
           'message',
-          contains('Cookie 已失效'),
+              contains('登录已失效'),
         ),
       ),
     );

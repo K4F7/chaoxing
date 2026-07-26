@@ -177,8 +177,15 @@ class LocalReminderService {
   }) {
     return planReminders(items: items, history: history, now: now)
         .where((plan) {
-          final age = now.difference(plan.triggerAt);
-          return !age.isNegative && age <= const Duration(hours: 1);
+          if (now.isBefore(plan.triggerAt)) {
+            return false;
+          }
+          if (plan.ruleId == 'due-24h') {
+            return now.isBefore(
+              plan.item.dueAt!.subtract(const Duration(hours: 2)),
+            );
+          }
+          return true;
         })
         .map(
           (plan) => ReminderCandidate(

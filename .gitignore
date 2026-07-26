@@ -23,6 +23,7 @@ venv/
 # Reports and local secrets
 reports/
 .worktrees/
+.scratch/
 .env
 .env.*
 !.env.example

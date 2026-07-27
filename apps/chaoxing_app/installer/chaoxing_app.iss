@@ -47,21 +47,10 @@ var
 function StopAllApplicationInstances: Boolean;
 var
   ErrorCode: Integer;
-  Parameters: String;
 begin
-  Parameters := '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' +
-    'Get-CimInstance Win32_Process -Filter ' +
-    '''Name = ""chaoxing_app.exe""'' | ' +
-    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; ' +
-    '$deadline = [DateTime]::UtcNow.AddSeconds(15); ' +
-    'do { ' +
-    '$running = Get-CimInstance Win32_Process -Filter ' +
-    '''Name = ""chaoxing_app.exe""''; ' +
-    'if (-not $running) { exit 0 }; Start-Sleep -Milliseconds 100 ' +
-    '} while ([DateTime]::UtcNow -lt $deadline); exit 1"';
-  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    Parameters, '', SW_HIDE, ewWaitUntilTerminated, ErrorCode) and
-    (ErrorCode = 0);
+  Result := Exec(ExpandConstant('{sys}\taskkill.exe'),
+    '/F /IM chaoxing_app.exe', '', SW_HIDE, ewWaitUntilTerminated,
+    ErrorCode) and ((ErrorCode = 0) or (ErrorCode = 128));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

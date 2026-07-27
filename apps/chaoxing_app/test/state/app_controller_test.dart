@@ -11,6 +11,18 @@ import 'package:chaoxing_app/state/app_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('updates the course source switch without starting a sync', () async {
+    final storage = MemoryAppStorage(config: AppConfig.empty);
+    final controller = AppController(storage);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    await controller.setCourseSourcesEnabled(false);
+
+    expect(controller.config.courseSourcesEnabled, isFalse);
+    expect(storage.config.courseSourcesEnabled, isFalse);
+  });
+
   test('loads and updates monitored course selections', () async {
     final storage = MemoryAppStorage(
       courseCatalog: const CourseCatalog(

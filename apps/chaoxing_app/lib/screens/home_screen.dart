@@ -121,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
           initialConfig: widget.controller.config,
           onSave: widget.controller.saveConfig,
           courseCatalog: widget.controller.courseCatalog,
+          onCourseSourcesChanged: widget.controller.setCourseSourcesEnabled,
           onCourseMonitoringChanged: widget.controller.setCourseMonitored,
           onRefreshCourses: widget.controller.refreshCourses,
           autostartEnabledLoader: Platform.isWindows

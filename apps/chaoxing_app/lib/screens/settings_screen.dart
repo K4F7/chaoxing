@@ -11,6 +11,7 @@ typedef NotificationTester = Future<bool> Function(bool showDetails);
 typedef VersionLabelLoader = Future<String> Function();
 typedef CourseMonitoringChanged =
     Future<void> Function(String courseKey, bool monitored);
+typedef CourseSourcesChanged = Future<void> Function(bool enabled);
 typedef AutostartEnabledLoader = Future<bool> Function();
 typedef AutostartChanged = Future<void> Function(bool enabled);
 typedef UpdateInfoLoader = Future<UpdateInfo?> Function();
@@ -23,6 +24,7 @@ class SettingsScreen extends StatefulWidget {
     this.onOpenLogin,
     this.onTestNotification,
     this.courseCatalog = CourseCatalog.empty,
+    this.onCourseSourcesChanged,
     this.onCourseMonitoringChanged,
     this.onRefreshCourses,
     this.autostartEnabledLoader,
@@ -38,6 +40,7 @@ class SettingsScreen extends StatefulWidget {
   final VoidCallback? onOpenLogin;
   final NotificationTester? onTestNotification;
   final CourseCatalog courseCatalog;
+  final CourseSourcesChanged? onCourseSourcesChanged;
   final CourseMonitoringChanged? onCourseMonitoringChanged;
   final Future<void> Function()? onRefreshCourses;
   final AutostartEnabledLoader? autostartEnabledLoader;
@@ -66,6 +69,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _saving = false;
   bool _testingNotification = false;
   bool _refreshingCourses = false;
+  bool _changingCourseSources = false;
   bool? _autostartEnabled;
   bool _changingAutostart = false;
 
@@ -218,7 +222,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('课程空间补充同步'),
             subtitle: const Text('从课程空间补抓作业和考试，减少仅依赖收件箱造成的漏项。接口变化时可能出现部分失败。'),
             value: _courseSourcesEnabled,
-            onChanged: (value) => setState(() => _courseSourcesEnabled = value),
+            onChanged: _changingCourseSources
+                ? null
+                : (value) async {
+                    final previous = _courseSourcesEnabled;
+                    final messenger = ScaffoldMessenger.of(context);
+                    setState(() {
+                      _courseSourcesEnabled = value;
+                      _changingCourseSources = true;
+                    });
+                    try {
+                      await widget.onCourseSourcesChanged?.call(value);
+                    } catch (_) {
+                      if (mounted) {
+                        setState(() => _courseSourcesEnabled = previous);
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('课程空间同步设置保存失败')),
+                        );
+                      }
+                    } finally {
+                      if (mounted) {
+                        setState(() => _changingCourseSources = false);
+                      }
+                    }
+                  },
           ),
           if (_courseSourcesEnabled) ...[
             const SizedBox(height: 8),

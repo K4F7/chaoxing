@@ -14,6 +14,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('course source toggle is saved immediately', (tester) async {
+    bool? enabled;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          initialConfig: AppConfig.empty,
+          onSave: (_) async {},
+          onCourseSourcesChanged: (value) async => enabled = value,
+        ),
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(SwitchListTile, '课程空间补充同步'));
+    await tester.pumpAndSettle();
+
+    expect(enabled, isFalse);
+  });
+
   testWidgets('settings lists monitored courses and updates a selection', (
     tester,
   ) async {

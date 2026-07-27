@@ -268,6 +268,17 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<void> setCourseSourcesEnabled(bool enabled) async {
+    await _serializeStorageMutation(() async {
+      final updated = _config.copyWith(courseSourcesEnabled: enabled);
+      await _storage.saveConfig(updated);
+      if (_disposed) {
+        return;
+      }
+      _applyConfig(updated, scheduleRefresh: false);
+    });
+  }
+
   Future<void> setCourseMonitored(String courseKey, bool monitored) async {
     await _serializeStorageMutation(() async {
       final updated = _courseCatalog.setMonitored(courseKey, monitored);

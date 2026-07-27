@@ -1377,6 +1377,9 @@ String? findCourseInteractionUrl(String html) {
 }
 
 bool isAssignmentOrExamRelated(InboxMessage message) {
+  if (message.title.contains('结束提醒')) {
+    return false;
+  }
   return RegExp(
     r'作业|考试|测验|测试|截止|结束提醒|答题|试卷|练习',
   ).hasMatch('${message.title}\n${message.content ?? ''}');

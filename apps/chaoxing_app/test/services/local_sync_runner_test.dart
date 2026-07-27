@@ -88,6 +88,38 @@ void main() {
         ),
         isTrue,
       );
+      expect(
+        isAssignmentOrExamRelated(
+          const InboxMessage(
+            id: '3',
+            uuid: null,
+            title: '作业结束提醒',
+            sender: null,
+            sendTime: null,
+            isRead: false,
+            content: null,
+            detailUrl: null,
+            sendTag: 0,
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        isAssignmentOrExamRelated(
+          const InboxMessage(
+            id: '4',
+            uuid: null,
+            title: '考试结束提醒',
+            sender: null,
+            sendTime: null,
+            isRead: false,
+            content: null,
+            detailUrl: null,
+            sendTag: 0,
+          ),
+        ),
+        isFalse,
+      );
       expect(summary.assignmentLinks, [
         'https://mooc1.chaoxing.com/work?workOrExam=work&workId=1',
       ]);

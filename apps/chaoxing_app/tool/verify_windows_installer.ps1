@@ -47,12 +47,28 @@ try {
   if ($hiddenProcess.MainWindowHandle -ne [IntPtr]::Zero) {
     throw "Hidden instance unexpectedly created a visible main window."
   }
-  Stop-Process -Id $hiddenProcess.Id -Force
-  $hiddenProcess.WaitForExit()
+
+  $upgrade = Start-Process -FilePath $resolvedInstaller -ArgumentList @(
+    "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+  ) -Wait -PassThru
+  if ($upgrade.ExitCode -ne 0) {
+    throw "Silent upgrade failed with exit code $($upgrade.ExitCode)."
+  }
+  Wait-Until {
+    $hiddenProcess.Refresh()
+    $hiddenProcess.HasExited
+  } "Running application was not closed during upgrade."
   $hiddenProcess = $null
 
   & "$PSScriptRoot/verify_windows_single_instance.ps1" `
     -Executable $installedExecutable
+
+  $hiddenProcess = Start-Process -FilePath $installedExecutable `
+    -ArgumentList "--hidden" -PassThru -WindowStyle Hidden
+  Wait-Until {
+    $hiddenProcess.Refresh()
+    -not $hiddenProcess.HasExited
+  } "Application did not start before uninstall verification."
 
   $uninstaller = Join-Path $installDirectory "unins000.exe"
   $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
@@ -61,6 +77,11 @@ try {
   if ($uninstall.ExitCode -ne 0) {
     throw "Silent uninstall failed with exit code $($uninstall.ExitCode)."
   }
+  Wait-Until {
+    $hiddenProcess.Refresh()
+    $hiddenProcess.HasExited
+  } "Running application was not closed during uninstall."
+  $hiddenProcess = $null
   Wait-Until { -not (Test-Path -LiteralPath $installDirectory) } `
     "Installation directory remains after uninstall."
   $runProperties = Get-ItemProperty -LiteralPath "Registry::$runKey" `

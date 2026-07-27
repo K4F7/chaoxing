@@ -26,6 +26,9 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\chaoxing_app.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=force
+CloseApplicationsFilter=chaoxing_app.exe
+RestartApplications=no
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -33,21 +36,71 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{group}\学习通待办"; Filename: "{app}\chaoxing_app.exe"; WorkingDir: "{app}"
 
+[UninstallDelete]
+Type: files; Name: "{userdesktop}\学习通待办.lnk"
+
 [Code]
-function WebView2Installed: Boolean;
 var
-  Version: String;
+  RunAfterInstallCheckBox: TNewCheckBox;
+  CreateDesktopShortcutCheckBox: TNewCheckBox;
+
+function StopAllApplicationInstances: Boolean;
+var
+  ErrorCode: Integer;
+  Parameters: String;
 begin
-  Result :=
-    RegQueryStringValue(HKLM64,
-      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E2F8-A4E8-4A4A-9B9A-8F6F8C5A0D54}',
-      'pv', Version) or
-    RegQueryStringValue(HKLM32,
-      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E2F8-A4E8-4A4A-9B9A-8F6F8C5A0D54}',
-      'pv', Version) or
-    RegQueryStringValue(HKCU,
-      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E2F8-A4E8-4A4A-9B9A-8F6F8C5A0D54}',
-      'pv', Version);
+  Parameters := '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' +
+    'Get-CimInstance Win32_Process -Filter ' +
+    '''Name = ""chaoxing_app.exe""'' | ' +
+    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; ' +
+    '$deadline = [DateTime]::UtcNow.AddSeconds(15); ' +
+    'do { ' +
+    '$running = Get-CimInstance Win32_Process -Filter ' +
+    '''Name = ""chaoxing_app.exe""''; ' +
+    'if (-not $running) { exit 0 }; Start-Sleep -Milliseconds 100 ' +
+    '} while ([DateTime]::UtcNow -lt $deadline); exit 1"';
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Parameters, '', SW_HIDE, ewWaitUntilTerminated, ErrorCode) and
+    (ErrorCode = 0);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not StopAllApplicationInstances then
+    Result := '无法关闭正在运行的学习通待办，请手动退出后重试。';
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := StopAllApplicationInstances;
+  if not Result then
+    MsgBox('无法关闭正在运行的学习通待办，请手动退出后重试。',
+      mbError, MB_OK);
+end;
+
+procedure InitializeWizard;
+var
+  OptionTop: Integer;
+begin
+  OptionTop := WizardForm.FinishedLabel.Top +
+    WizardForm.FinishedLabel.Height + ScaleY(16);
+
+  RunAfterInstallCheckBox := TNewCheckBox.Create(WizardForm);
+  RunAfterInstallCheckBox.Parent := WizardForm.FinishedPage;
+  RunAfterInstallCheckBox.Left := WizardForm.FinishedLabel.Left;
+  RunAfterInstallCheckBox.Top := OptionTop;
+  RunAfterInstallCheckBox.Width := WizardForm.FinishedLabel.Width;
+  RunAfterInstallCheckBox.Caption := '立即运行学习通待办';
+  RunAfterInstallCheckBox.Checked := False;
+
+  CreateDesktopShortcutCheckBox := TNewCheckBox.Create(WizardForm);
+  CreateDesktopShortcutCheckBox.Parent := WizardForm.FinishedPage;
+  CreateDesktopShortcutCheckBox.Left := WizardForm.FinishedLabel.Left;
+  CreateDesktopShortcutCheckBox.Top := OptionTop + ScaleY(28);
+  CreateDesktopShortcutCheckBox.Width := WizardForm.FinishedLabel.Width;
+  CreateDesktopShortcutCheckBox.Caption := '创建桌面快捷方式';
+  CreateDesktopShortcutCheckBox.Checked := False;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -57,16 +110,21 @@ begin
       'Software\Microsoft\Windows\CurrentVersion\Run', 'ChaoxingTodo');
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+function NextButtonClick(CurPageID: Integer): Boolean;
 var
   ErrorCode: Integer;
 begin
-  if (CurStep = ssPostInstall) and (not WebView2Installed) and
-     (not WizardSilent) then begin
-    if MsgBox(
-      '内置登录需要 Microsoft Edge WebView2 Runtime。现在打开官方下载页吗？',
-      mbConfirmation, MB_YESNO) = IDYES then
-      ShellExec('open', 'https://go.microsoft.com/fwlink/p/?LinkId=2124703',
-        '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+  Result := True;
+  if CurPageID = wpFinished then begin
+    if CreateDesktopShortcutCheckBox.Checked then
+      CreateShellLink(
+        ExpandConstant('{userdesktop}\学习通待办.lnk'),
+        '学习通待办', ExpandConstant('{app}\chaoxing_app.exe'), '',
+        ExpandConstant('{app}'), ExpandConstant('{app}\chaoxing_app.exe'),
+        0, SW_SHOWNORMAL);
+
+    if RunAfterInstallCheckBox.Checked then
+      Exec(ExpandConstant('{app}\chaoxing_app.exe'), '',
+        ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ErrorCode);
   end;
 end;

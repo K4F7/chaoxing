@@ -192,13 +192,18 @@ jobs:
             }
           }
 
-      - name: Upload Windows artifact
+      - name: Upload Windows portable artifact
         uses: actions/upload-artifact@v7
         with:
-          name: chaoxing-app-windows-x64
-          path: |
-            apps/chaoxing_app/build/chaoxing-app-windows-x64.zip
-            apps/chaoxing_app/build/chaoxing-app-windows-x64-setup.exe
+          name: chaoxing-app-windows-x64-portable
+          path: apps/chaoxing_app/build/chaoxing-app-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Upload Windows setup artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: chaoxing-app-windows-x64-setup
+          path: apps/chaoxing_app/build/chaoxing-app-windows-x64-setup.exe
           if-no-files-found: error
 
   release:
@@ -244,7 +249,7 @@ jobs:
             - Windows：推荐运行 `chaoxing-app-windows-x64-setup.exe` 安装；也可解压便携版 ZIP 后运行 `chaoxing_app.exe`。
             - Android：安装 `app-release.apk`。
             - 内部构建号：`${{ github.run_number }}`（Android versionCode / Windows build suffix）。
-            - 完整性校验：使用 `SHA256SUMS` 核对 APK 和 Windows ZIP 的 SHA-256。
+            - 完整性校验：使用 `SHA256SUMS` 核对 APK、Windows ZIP 和安装程序的 SHA-256。
             - 学习通 Cookie 仅保存在设备安全存储中，并只发送到学习通可信域名。
             - Windows 客户端支持内置 WebView2 登录并自动导入 Cookie，也保留手动导入作为备用方式。
 
@@ -256,4 +261,9 @@ jobs:
             - Windows 系统通知和托盘常驻已接入；通知肉眼可见性、点击行为和托盘菜单退出仍需按发布版本手动验收。
             - 课程空间补充同步默认开启，会补抓课程作业与考试；明确完成、已提交、过期和只读事项会被过滤，状态不明事项会保留以避免漏项。
             - App 退出后不提供 Windows Service 或系统计划任务式后台同步。
-          files: release-assets/*
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/app-release.apk
+            release-assets/chaoxing-app-windows-x64.zip
+            release-assets/chaoxing-app-windows-x64-setup.exe
+            release-assets/SHA256SUMS

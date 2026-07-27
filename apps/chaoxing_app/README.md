@@ -48,10 +48,11 @@ build/windows/x64/runner/Release/
 
 GitHub Actions 会在 Windows runner 上执行 `flutter analyze`、`flutter test` 和
 `flutter build windows --release`，然后把完整的 Release 目录打包为
-`chaoxing-app-windows-x64.zip`。main 分支推送构建还会在同一个 GitHub Release
-中发布 Windows 压缩包和 Android APK；功能分支、PR 和手动触发只上传临时
-artifact，不创建正式 Release。正式 Release 还会生成覆盖 APK 与 Windows ZIP
-的 `SHA256SUMS`，并使用 GitHub Actions `run_number` 作为 Android versionCode
+`chaoxing-app-windows-x64.zip`。便携版 ZIP 与安装程序作为两个独立 artifact
+上传。main 分支推送构建还会在同一个 GitHub Release 中发布 Windows ZIP、
+Windows 安装程序和 Android APK；功能分支、PR 和手动触发只上传临时 artifact，
+不创建正式 Release。正式 Release 还会生成覆盖全部安装文件的 `SHA256SUMS`，
+并使用 GitHub Actions `run_number` 作为 Android versionCode
 和 Windows build suffix；同一分支的新构建会取消仍在运行的旧构建。checkout、
 Java setup 和 artifact action 使用基于 Node 24 的当前官方主版本，避免 Hosted
 Runner 移除 Node 20 后在 Flutter 构建前失败。

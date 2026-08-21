@@ -10,11 +10,13 @@ cd "$root"
 export CI=1
 export EXPO_NO_TELEMETRY=1
 export ORG_GRADLE_PROJECT_reactNativeArchitectures="${ORG_GRADLE_PROJECT_reactNativeArchitectures:-arm64-v8a}"
+# Local Expo plugins live outside the app package; resolve @expo/config-plugins from the app.
+export NODE_PATH="${root}/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 mkdir -p build/ci
 rm -f build/ci/app-debug.apk build/ci/app-release.apk build/ci/SIGNING.txt
 
-npx expo prebuild --platform android --non-interactive --no-install
+npx expo prebuild --platform android --no-install
 
 if [[ ! -d android ]]; then
   echo "expo prebuild did not create apps/chaoxing_rn/android" >&2

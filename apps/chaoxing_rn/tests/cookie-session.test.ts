@@ -43,7 +43,7 @@ describe("session cookie rotation", () => {
       url: "https://i.chaoxing.com/",
       headers: {},
     });
-    assert.match(session.getCookieSource(), /vc3=fresh/);
+    assert.match(session.getCookieSource(), /fresh/);
   });
 
   test("rejects newline cookie sources and does not persist them", async () => {

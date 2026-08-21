@@ -37,7 +37,7 @@ describe("Windows due-now reminders", () => {
       showDetails: false,
       remindersEnabled: true,
       notifier: {
-        show(notification) {
+        show(notification: { title: string; body: string }) {
           shown.push(notification.body);
           return true;
         },

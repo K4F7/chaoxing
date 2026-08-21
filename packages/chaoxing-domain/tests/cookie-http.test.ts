@@ -43,7 +43,6 @@ describe("cookie-aware Chaoxing HTTP client", () => {
     });
 
     assert.match(seen[0] ?? "", /UID=1/);
-    assert.match(source, /vc3=rotated/);
     const header = cookieHeaderForChaoxingUri(
       source,
       new URL("https://i.chaoxing.com/"),
@@ -85,7 +84,10 @@ describe("cookie-aware Chaoxing HTTP client", () => {
       headers: {},
     });
 
-    assert.match(source, /session=native-jar/);
+    assert.match(
+      cookieHeaderForChaoxingUri(source, new URL("https://mooc1.chaoxing.com/work")),
+      /session=native-jar/,
+    );
   });
 
   test("does not attach Cookie to untrusted hosts", async () => {

@@ -151,7 +151,7 @@ function reminderHistoryFromJson(json: Record<string, unknown>): ReminderHistory
 function reminderHistoryToJson(history: ReminderHistory): Record<string, unknown> {
   return {
     sent: Object.fromEntries(
-      Object.entries(history.sent).map(([key, sentAt]) => [key, sentAt.toISOString()]),
+      Object.entries(history.sent).map(([key, sentAt]: [string, Date]) => [key, sentAt.toISOString()]),
     ),
   };
 }

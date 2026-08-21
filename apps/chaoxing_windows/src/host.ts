@@ -160,7 +160,7 @@ export class WindowsHost {
         config: configFromSettings(this.settings, cookie),
         previous: this.sync,
         courseCatalog: this.catalog,
-        onCourseCatalogChanged: async (catalog) => {
+        onCourseCatalogChanged: async (catalog: CourseCatalog) => {
           this.catalog = catalog;
           await this.store.saveCourseCatalog(catalog);
         },
@@ -199,7 +199,7 @@ export function createHostHttpClient(
     inner,
     session: {
       getSource: () => session.getCookieSource(),
-      persist: (source) => session.replaceCookieSource(source),
+      persist: (source: string) => session.replaceCookieSource(source),
     },
   });
 }

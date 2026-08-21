@@ -31,7 +31,7 @@ describe("受监控课程", () => {
     const catalog = mergeDiscoveredCourses(
       emptyCourseCatalog,
       [linear, physics],
-      new Date("2026-07-27T01:00:00+08:00"),
+      new Date(2026, 6, 27, 1),
     );
 
     assert.deepEqual(
@@ -40,12 +40,12 @@ describe("受监控课程", () => {
     );
     assert.equal(shouldDiscoverCourses({
       catalog,
-      now: new Date("2026-07-27T10:00:00+08:00"),
+      now: new Date(2026, 6, 27, 10),
       forceDiscovery: false,
     }), false);
     assert.equal(shouldDiscoverCourses({
       catalog,
-      now: new Date("2026-07-28T01:00:00+08:00"),
+      now: new Date(2026, 6, 28, 1),
       forceDiscovery: false,
     }), true);
   });

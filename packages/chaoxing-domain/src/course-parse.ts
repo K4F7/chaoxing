@@ -8,7 +8,7 @@ import {
   normalizeWhitespace,
   stripHtml,
 } from "./html";
-import { asRecord, firstMapText, nullableString } from "./json";
+import { asRecord, firstMapText } from "./json";
 import { isTrustedChaoxingUrl } from "./url-policy";
 import { readUrlParamAny, resolveTrustedUrl } from "./urls";
 
@@ -230,5 +230,3 @@ function normalizeCourseTaskUrl(rawUrl: string, baseUrl: string): string | null 
   const hasTaskPath = /\/(?:work|exam|exam-ans|mooc-ans)\b/i.test(text);
   return hasTaskId && hasTaskPath ? text : null;
 }
-
-export { nullableString };

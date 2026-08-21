@@ -260,7 +260,7 @@ export function messageFromSeenNotice(notice: {
   title: string;
   sendTime: string | null | undefined;
   content: string | null | undefined;
-  sendTag: unknown;
+  sendTag?: unknown;
 }): InboxMessage {
   return {
     id: notice.id,
@@ -356,11 +356,11 @@ function inferYear(
   const normalized = sourceSendTime?.trim().replaceAll("/", "-");
   const sourceParts = normalized?.match(/^(\d{4})-(\d{1,2})-/);
   const year =
-    sourceParts === undefined
+    sourceParts == null
       ? fallbackDate.getFullYear()
       : Number.parseInt(sourceParts[1], 10);
   const sourceMonth =
-    sourceParts === undefined
+    sourceParts == null
       ? fallbackDate.getMonth() + 1
       : Number.parseInt(sourceParts[2], 10);
   return sourceMonth === 12 && month === 1 ? year + 1 : year;

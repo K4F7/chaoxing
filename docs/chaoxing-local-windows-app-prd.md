@@ -102,8 +102,10 @@
 
 ### 技术栈
 
-- Flutter/Dart，目标平台 Windows 桌面与 Android。
-- Dart 侧 HTTP 与 HTML 解析用于学习通页面抓取。
+- 当前生产实现：Flutter/Dart，目标平台 Windows 桌面与 Android。
+- 目标运行时：React Native（Android 先行）。迁移方式见 [ADR-0002](./adr/0002-react-native-incremental-migration.md)。
+- 可移植领域切片（提醒规则、URL 信任分级）用 TypeScript 写在 `packages/chaoxing-domain`。
+- Dart 侧 HTTP 与 HTML 解析仍用于当前 Flutter 生产路径的学习通页面抓取。
 
 ---
 

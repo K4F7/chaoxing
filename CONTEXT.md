@@ -56,4 +56,6 @@ _Avoid_：白名单、域名校验
 Windows 与 Android 各自独立完成抓取、存储和提醒，互不通信、互不依赖。代价是同一条提醒可能在两端各响一次——这是刻意接受的，用来换取任何一端单独安装即可使用，不需要配置服务端或配对设备。
 
 两端的提醒能力并不对称：Android 能区分提醒的打扰强度，而 Windows 只有一种系统通知强度，因此在 Windows 上不同强度的提醒表现相同。这一不对称是刻意保留的，工具不会为了对齐而削弱 Android 一侧。
+
+当前生产实现是 Flutter；目标运行时是 React Native。领域约束不随实现栈改变，迁移方式见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md)。
 _Avoid_：端、客户端、设备

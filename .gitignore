@@ -3,6 +3,7 @@
 .wrangler/
 node_modules/
 dist/
+.expo/
 *.log
 google-oauth-client.json
 

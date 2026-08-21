@@ -1,6 +1,10 @@
+# 学习通待办（Flutter 参考实现，已退出生产）
+
+**不再出货。** 生产 Android 是 `apps/chaoxing_rn`，生产 Windows 是 `apps/chaoxing_windows`。本目录只作行为对照。
+
 # 学习通待办 App
 
-Flutter 客户端，当前面向 Windows 桌面。App 在本机使用学习通 Cookie 同步收件箱里的作业和考试待办，并可选择从课程空间补抓作业/考试列表。术语见仓库根目录的 [CONTEXT.md](../../CONTEXT.md)。
+Flutter 参考客户端（历史 Windows / Android 实现）。App 在本机使用学习通 Cookie 同步收件箱里的作业和考试待办，并可选择从课程空间补抓作业/考试列表。术语见仓库根目录的 [CONTEXT.md](../../CONTEXT.md)。
 
 ## 首次配置
 

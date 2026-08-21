@@ -6,27 +6,30 @@
 
 ## 项目结构
 
-- `apps/chaoxing_app/`：Flutter App，支持 Windows 和 Android。这是当前唯一的产品形态。
+- `apps/chaoxing_rn/`：Android 生产应用（Expo / React Native）。应用内登录、真同步、待办、设置与受监控课程、诊断导出、AlarmManager 预排提醒。
+- `apps/chaoxing_windows/`：Windows 生产应用（TypeScript 本机宿主 + C# 外壳）。WebView2 登录、托盘、「此刻该触发的」提醒、开机自启、Inno Setup 安装器。
+- `packages/chaoxing-domain/`：可移植的 TypeScript 领域切片（同步、解析、认证、提醒规则、URL 信任分级、诊断脱敏）。
+- `packages/chaoxing-android-alarms/`：Android 预排闹钟。
+- `packages/chaoxing-android-http/`：OkHttp + CookieManager，补上 JS `fetch` 读不到 `Set-Cookie` 的缺口。
+- `legacy/chaoxing_app/`：Flutter 参考实现，**不是**生产出货路径。
 - `docs/`：产品文档与架构决策记录。
-- `src/`、`scripts/`、`tests/`：早期 Cloudflare Worker 实现的遗留代码，已不参与 App 运行路径，仅作为解析行为的对照保留。
+- `src/`、`scripts/`、`tests/`：早期 Cloudflare Worker 实现的遗留代码，已不参与 App 运行路径。
 
 ## 使用
 
-见 [`apps/chaoxing_app/README.md`](./apps/chaoxing_app/README.md)：首次登录、Windows 运行与构建、Android 构建、安全边界与已知限制。
+- Android：见 [`apps/chaoxing_rn/README.md`](./apps/chaoxing_rn/README.md)。需要开发构建（`npx expo run:android`）才能读 HttpOnly Cookie。
+- Windows：见 [`apps/chaoxing_windows/README.md`](./apps/chaoxing_windows/README.md)。C# 外壳与安装器在 Windows SDK 上构建。
 
 ## 验证
 
-```sh
-cd apps/chaoxing_app
-flutter analyze
-flutter test
-flutter build windows
-```
-
-遗留 Worker 代码的测试仍可单独运行，与 App 无依赖关系：
+生产路径（不需要 Flutter）：
 
 ```sh
-bun install
-bun run typecheck
-bun test
+cd packages/chaoxing-domain && npm test && npm run typecheck
+cd ../chaoxing-android-alarms && npm test && npm run typecheck
+cd ../chaoxing-android-http && npm ci && npm test && npm run typecheck
+cd ../../apps/chaoxing_rn && npm test && npm run typecheck
+cd ../chaoxing_windows && npm ci && npm test && npm run typecheck
 ```
+
+Flutter 参考实现只在改 `legacy/chaoxing_app` 时由遗留 CI 跑 `flutter analyze` / `flutter test`，不再打生产包。

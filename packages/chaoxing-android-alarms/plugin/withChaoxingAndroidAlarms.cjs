@@ -1,8 +1,16 @@
+function loadConfigPlugins() {
+  try {
+    return require("@expo/config-plugins");
+  } catch (err) {
+    return require(require.resolve("@expo/config-plugins", { paths: [process.cwd()] }));
+  }
+}
+
 const {
   AndroidConfig,
   createRunOncePlugin,
   withAndroidManifest,
-} = require("@expo/config-plugins");
+} = loadConfigPlugins();
 
 const PACKAGE_NAME = "@chaoxinghelper/android-alarms";
 const RECEIVER_FIRE = "com.chaoxinghelper.alarms.ChaoxingAlarmReceiver";

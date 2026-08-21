@@ -1,0 +1,63 @@
+name: Chaoxing RN
+
+on:
+  push:
+    paths:
+      - ".github/workflows/chaoxing-rn.yml"
+      - "packages/chaoxing-domain/**"
+      - "apps/chaoxing_rn/**"
+  pull_request:
+    paths:
+      - ".github/workflows/chaoxing-rn.yml"
+      - "packages/chaoxing-domain/**"
+      - "apps/chaoxing_rn/**"
+  workflow_dispatch:
+
+concurrency:
+  group: chaoxing-rn-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  domain-and-preview:
+    name: Domain + RN preview
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            packages/chaoxing-domain/package-lock.json
+            apps/chaoxing_rn/package-lock.json
+
+      - name: Install domain package
+        working-directory: packages/chaoxing-domain
+        run: npm ci
+
+      - name: Typecheck domain package
+        working-directory: packages/chaoxing-domain
+        run: npm run typecheck
+
+      - name: Test domain package
+        working-directory: packages/chaoxing-domain
+        run: npm test
+
+      - name: Install React Native app
+        working-directory: apps/chaoxing_rn
+        run: npm ci
+
+      - name: Typecheck React Native app
+        working-directory: apps/chaoxing_rn
+        run: npm run typecheck
+
+      - name: Test React Native preview wiring
+        working-directory: apps/chaoxing_rn
+        run: npm test

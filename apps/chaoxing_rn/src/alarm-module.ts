@@ -1,6 +1,8 @@
 import {
   nativeBackendFromModule,
+  nativeRuntimeFromModule,
   type AlarmBackend,
+  type AlarmRuntime,
   type NativeAlarmModule,
 } from "@chaoxinghelper/android-alarms";
 import { requireOptionalNativeModule } from "expo-modules-core";
@@ -11,4 +13,8 @@ export function loadNativeAlarmModule(): NativeAlarmModule | null {
 
 export function createProductionAlarmBackend(): AlarmBackend | null {
   return nativeBackendFromModule(loadNativeAlarmModule());
+}
+
+export function createProductionAlarmRuntime(): AlarmRuntime | null {
+  return nativeRuntimeFromModule(loadNativeAlarmModule());
 }

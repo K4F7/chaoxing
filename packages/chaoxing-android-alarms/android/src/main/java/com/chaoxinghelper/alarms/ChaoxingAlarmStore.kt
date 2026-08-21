@@ -37,6 +37,61 @@ class ChaoxingAlarmStore(context: Context) {
     prefs.edit().remove(KEY_PLANS).apply()
   }
 
+  fun recordDelivered(key: String, itemId: String, firedAtMs: Long) {
+    if (key.isEmpty()) {
+      return
+    }
+    val next = listDeliveredInternal().filterNot { it.key == key } +
+      DeliveredReminder(key, itemId, firedAtMs)
+    saveDelivered(next)
+  }
+
+  fun listDelivered(): List<Map<String, Any>> {
+    return listDeliveredInternal().map {
+      mapOf(
+        "key" to it.key,
+        "itemId" to it.itemId,
+        "firedAtMs" to it.firedAtMs,
+      )
+    }
+  }
+
+  fun consumeDelivered(keys: List<String>) {
+    val drop = keys.toSet()
+    saveDelivered(listDeliveredInternal().filterNot { drop.contains(it.key) })
+  }
+
+  private fun listDeliveredInternal(): List<DeliveredReminder> {
+    val raw = prefs.getString(KEY_DELIVERED, "[]") ?: "[]"
+    val array = JSONArray(raw)
+    return buildList(array.length()) {
+      for (index in 0 until array.length()) {
+        val json = array.getJSONObject(index)
+        add(
+          DeliveredReminder(
+            key = json.optString("key"),
+            itemId = json.optString("itemId"),
+            firedAtMs = json.optLong("firedAtMs"),
+          ),
+        )
+      }
+    }.filter { it.key.isNotEmpty() }
+  }
+
+  private fun saveDelivered(rows: List<DeliveredReminder>) {
+    val array = JSONArray()
+    rows.forEach { row ->
+      array.put(
+        JSONObject().apply {
+          put("key", row.key)
+          put("itemId", row.itemId)
+          put("firedAtMs", row.firedAtMs)
+        },
+      )
+    }
+    prefs.edit().putString(KEY_DELIVERED, array.toString()).apply()
+  }
+
   private fun toJson(record: ChaoxingAlarmRecord): JSONObject {
     return JSONObject().apply {
       put("key", record.key)
@@ -83,5 +138,12 @@ class ChaoxingAlarmStore(context: Context) {
   companion object {
     private const val PREFS_NAME = "chaoxing_android_alarms"
     private const val KEY_PLANS = "plans"
+    private const val KEY_DELIVERED = "delivered"
   }
 }
+
+private data class DeliveredReminder(
+  val key: String,
+  val itemId: String,
+  val firedAtMs: Long,
+)

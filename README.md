@@ -6,10 +6,10 @@
 
 ## 项目结构
 
-- `apps/chaoxing_app/`：Flutter App，支持 Windows 和 Android。这是当前唯一的生产形态。
-- `packages/chaoxing-domain/`：可移植的 TypeScript 领域切片（提醒规则、URL 信任分级）。供 React Native 使用。
-- `packages/chaoxing-android-alarms/`：ADR-0001 的 RN Android 预排闹钟（两档映射 + Expo native module）。见 [docs/rn-android-alarms.md](docs/rn-android-alarms.md)。
-- `apps/chaoxing_rn/`：Expo / React Native 脚手架。领域切片已接线；Android 闹钟可从 fixture 待办事项登记。不做登录或抓取。见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md)。
+- `apps/chaoxing_app/`：Flutter App。Windows 生产形态；Android 在 RN 真机验收完成前的回退。
+- `packages/chaoxing-domain/`：可移植的 TypeScript 领域切片（提醒规则、URL 信任、同步 / 解析 / 认证）。
+- `packages/chaoxing-android-alarms/`：ADR-0001 两档 AlarmManager。见 [docs/rn-android-alarms.md](docs/rn-android-alarms.md)。
+- `apps/chaoxing_rn/`：Android React Native 生产候选。见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md) 与 [docs/rn-android-production.md](docs/rn-android-production.md)。
 - `docs/`：产品文档与架构决策记录。
 - `src/`、`scripts/`、`tests/`：早期 Cloudflare Worker 实现的遗留代码，已不参与 App 运行路径，仅作为解析行为的对照保留。
 

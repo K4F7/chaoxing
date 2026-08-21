@@ -19,4 +19,4 @@
 
 - 不要把 Cookie 写入普通偏好、诊断正文或日志。
 - 不要在认证失效时安静地继续自动同步。
-- 不要在本目录实现课程同步或闹钟调度。
+- 课程同步与闹钟调度在 `src/sync` / `src/http` 与 `@chaoxinghelper/android-alarms`，不要把 Cookie 写进那些存储。

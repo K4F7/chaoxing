@@ -60,10 +60,33 @@ class ChaoxingAlarmNotifier(private val context: Context) {
     NotificationManagerCompat.from(context).notify(record.requestCode, notification)
   }
 
+  fun notifyAuthenticationExpired() {
+    ensureChannels()
+    val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+      ?: Intent()
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    val contentIntent = PendingIntent.getActivity(
+      context,
+      REQUEST_AUTH_EXPIRED,
+      launch,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val notification = NotificationCompat.Builder(context, CHANNEL_HIGH)
+      .setSmallIcon(android.R.drawable.ic_dialog_info)
+      .setContentTitle("学习通登录已失效")
+      .setContentText("请打开应用重新登录，自动同步已停止。")
+      .setContentIntent(contentIntent)
+      .setAutoCancel(true)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .build()
+    NotificationManagerCompat.from(context).notify(REQUEST_AUTH_EXPIRED, notification)
+  }
+
   companion object {
     const val CHANNEL_LOW = "chaoxing-reminder-low"
     const val CHANNEL_HIGH = "chaoxing-reminder-high"
     const val EXTRA_ITEM_ID = "chaoxing.itemId"
     const val EXTRA_REMINDER_KEY = "chaoxing.reminderKey"
+    const val REQUEST_AUTH_EXPIRED = 190019
   }
 }

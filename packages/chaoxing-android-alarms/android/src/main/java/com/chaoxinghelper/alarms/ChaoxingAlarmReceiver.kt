@@ -23,7 +23,10 @@ class ChaoxingAlarmReceiver : BroadcastReceiver() {
     if (record.key.isEmpty()) {
       return
     }
-    ChaoxingAlarmNotifier(context.applicationContext).notify(record)
-    ChaoxingAlarmStore(context.applicationContext).remove(record.key)
+    val appContext = context.applicationContext
+    ChaoxingAlarmNotifier(appContext).notify(record)
+    val store = ChaoxingAlarmStore(appContext)
+    store.remove(record.key)
+    store.recordDelivered(record.key, record.itemId, System.currentTimeMillis())
   }
 }

@@ -1,29 +1,40 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { HomeViewModel } from "../auth/home-view-model";
-import type { ReminderPreview } from "../preview";
+import type { ProductionAppState } from "../sync/app-controller";
+import {
+  formatDueAt,
+  groupTodoItems,
+  kindLabel,
+} from "../sync/todo-groups";
 import { AuthExpiryBanner } from "./AuthExpiryBanner";
 
 type Props = {
   viewModel: HomeViewModel;
-  preview: ReminderPreview;
+  todo: ProductionAppState;
   onOpenLogin: () => void;
   onOpenManualCookie: () => void;
+  onRefresh: () => void;
+  onOpenItem: (itemId: string) => void;
 };
 
 export function HomeScreen({
   viewModel,
-  preview,
+  todo,
   onOpenLogin,
   onOpenManualCookie,
+  onRefresh,
+  onOpenItem,
 }: Props) {
+  const groups = groupTodoItems(todo.items);
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>学习通待办</Text>
       <Text style={styles.subtitle}>
-        Android 可在 App 内登录学习通。Cookie 只写入设备安全存储；认证失效会停掉自动同步并显示横幅。
+        Android 可在 App 内登录学习通。同步在本机直连学习通；提醒走预排 AlarmManager。
       </Text>
       <Text style={styles.status}>{viewModel.statusLine}</Text>
+      <Text style={styles.meta}>{syncStatusLine(todo)}</Text>
 
       {viewModel.expiryBanner ? (
         <AuthExpiryBanner
@@ -35,6 +46,20 @@ export function HomeScreen({
       {viewModel.error && !viewModel.expiryBanner ? (
         <View style={styles.errorCard}>
           <Text style={styles.errorText}>{viewModel.error}</Text>
+        </View>
+      ) : null}
+
+      {todo.alarmError ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>{todo.alarmError}</Text>
+        </View>
+      ) : null}
+
+      {todo.failures.length > 0 ? (
+        <View style={styles.warnCard}>
+          <Text style={styles.warnText}>
+            本轮有 {todo.failures.length} 处来源失败，列表可能不完整。
+          </Text>
         </View>
       ) : null}
 
@@ -53,6 +78,15 @@ export function HomeScreen({
         </View>
       ) : (
         <View style={styles.actions}>
+          <Pressable
+            onPress={onRefresh}
+            style={styles.primary}
+            disabled={todo.refreshing}
+          >
+            <Text style={styles.primaryLabel}>
+              {todo.refreshing ? "正在同步…" : "立即同步"}
+            </Text>
+          </Pressable>
           <Pressable onPress={onOpenLogin} style={styles.secondary}>
             <Text style={styles.secondaryLabel}>
               {viewModel.expiryBanner ? "重新登录" : "在 App 内重新登录"}
@@ -64,24 +98,58 @@ export function HomeScreen({
         </View>
       )}
 
-      <Text style={styles.section}>计划提醒</Text>
-      {preview.reminders.map((row) => (
-        <View key={row.key} style={styles.card}>
-          <Text style={styles.cardTitle}>{row.title}</Text>
-          <Text style={styles.cardMeta}>
-            {row.ruleId} · {row.intensityLabel}
-          </Text>
-        </View>
-      ))}
-
-      <Text style={styles.section}>URL 信任分级</Text>
-      {preview.urlChecks.map((row) => (
-        <Text key={row.url} style={styles.urlRow}>
-          {row.trusted ? "可信" : "不可信"} · {row.url}
+      {groups.length === 0 && viewModel.configured ? (
+        <Text style={styles.empty}>
+          {todo.lastSyncedAt
+            ? "当前没有待办事项。"
+            : "登录后会从学习通抓取作业和考试。"}
         </Text>
+      ) : null}
+
+      {groups.map((group) => (
+        <View key={group.id}>
+          <Text style={styles.section}>
+            {group.title} · {group.items.length}
+          </Text>
+          {group.items.map((item) => (
+            <Pressable
+              key={item.id}
+              style={styles.card}
+              onPress={() => onOpenItem(item.id)}
+            >
+              <Text style={styles.cardKind}>{kindLabel(item)}</Text>
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              <Text style={styles.cardMeta}>
+                {formatDueAt(item.dueAt)}
+                {item.sourceTitle ? ` · ${item.sourceTitle}` : ""}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
       ))}
     </ScrollView>
   );
+}
+
+function syncStatusLine(todo: ProductionAppState): string {
+  const parts: string[] = [];
+  if (todo.lastSyncedAt) {
+    parts.push(`上次同步 ${todo.lastSyncedAt.toLocaleString()}`);
+  }
+  if (todo.refreshing) {
+    parts.push(
+      todo.progress
+        ? `正在同步 ${todo.progress.phase} ${todo.progress.completed}/${todo.progress.total}`
+        : "正在同步",
+    );
+  }
+  if (todo.scheduledCount > 0) {
+    parts.push(`已预排 ${todo.scheduledCount} 条闹钟`);
+  }
+  if (todo.catalog.courses.length > 0) {
+    parts.push(`监控 ${todo.catalog.courses.filter((row) => row.monitored).length} 门课`);
+  }
+  return parts.join(" · ") || "尚未同步";
 }
 
 const styles = StyleSheet.create({
@@ -103,10 +171,15 @@ const styles = StyleSheet.create({
   },
   status: {
     marginTop: 10,
-    marginBottom: 16,
     fontSize: 14,
     fontWeight: "600",
     color: "#1e3a8a",
+  },
+  meta: {
+    marginTop: 4,
+    marginBottom: 16,
+    fontSize: 13,
+    color: "#4b5563",
   },
   setupCard: {
     marginBottom: 20,
@@ -130,13 +203,24 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: "#4b5563",
   },
+  empty: {
+    marginBottom: 16,
+    fontSize: 15,
+    color: "#4b5563",
+  },
   card: {
     marginBottom: 12,
     padding: 14,
     borderRadius: 12,
     backgroundColor: "#ffffff",
   },
+  cardKind: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1e3a8a",
+  },
   cardTitle: {
+    marginTop: 4,
     fontSize: 16,
     fontWeight: "600",
     color: "#111827",
@@ -145,11 +229,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 14,
     color: "#4b5563",
-  },
-  urlRow: {
-    marginBottom: 8,
-    fontSize: 13,
-    color: "#374151",
   },
   primary: {
     paddingVertical: 12,
@@ -181,6 +260,16 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: "#9a3412",
+    fontSize: 14,
+  },
+  warnCard: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#fef3c7",
+  },
+  warnText: {
+    color: "#92400e",
     fontSize: 14,
   },
 });

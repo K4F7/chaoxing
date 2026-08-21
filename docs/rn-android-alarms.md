@@ -7,7 +7,7 @@
 ## 落点
 
 - `packages/chaoxing-android-alarms`：两档映射、调度器、Expo native module、config plugin。
-- `apps/chaoxing_rn`：用已有领域规划器 + fixture 待办事项登记闹钟计划（调试屏）。不做登录、抓取或 Cookie。
+- `apps/chaoxing_rn`：真同步后的待办集合走 `planReminders` + `rescheduleAll`。fixture 助手只留在单元测试里。
 
 ## 两档怎么落到 AlarmManager
 
@@ -33,4 +33,4 @@
 
 ## 尚未接上的部分
 
-登录成功后的运行时通知权限、真实同步后的重排、点击通知跳到待办详情，都属于后续 RN 增量，不在本包伪造。
+登录后的 `POST_NOTIFICATIONS`、真同步后的全量重排、已投递键写入提醒历史、通知 extras 打开待办详情，由 `apps/chaoxing_rn` 的生产胶水接线。Doze / 开机重排仍需真机验收。

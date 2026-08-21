@@ -38,6 +38,15 @@ export { MemoryAlarmBackend } from "./memory-backend";
 export { UnsupportedAlarmBackend } from "./unsupported-backend";
 export {
   NativeAlarmBackend,
+  NativeAlarmRuntime,
   nativeBackendFromModule,
+  nativeRuntimeFromModule,
   type NativeAlarmModule,
 } from "./native";
+export {
+  MemoryAlarmRuntime,
+  UnsupportedAlarmRuntime,
+  type AlarmRuntime,
+  type DeliveredReminder,
+  type LaunchTarget,
+} from "./runtime";

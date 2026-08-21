@@ -5,11 +5,13 @@ on:
     paths:
       - ".github/workflows/chaoxing-rn.yml"
       - "packages/chaoxing-domain/**"
+      - "packages/chaoxing-android-alarms/**"
       - "apps/chaoxing_rn/**"
   pull_request:
     paths:
       - ".github/workflows/chaoxing-rn.yml"
       - "packages/chaoxing-domain/**"
+      - "packages/chaoxing-android-alarms/**"
       - "apps/chaoxing_rn/**"
   workflow_dispatch:
 
@@ -21,8 +23,8 @@ permissions:
   contents: read
 
 jobs:
-  domain-and-preview:
-    name: Domain + RN preview
+  domain-alarms-and-app:
+    name: Domain + alarms + RN app
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +38,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             packages/chaoxing-domain/package-lock.json
+            packages/chaoxing-android-alarms/package-lock.json
             apps/chaoxing_rn/package-lock.json
 
       - name: Install domain package
@@ -50,6 +53,18 @@ jobs:
         working-directory: packages/chaoxing-domain
         run: npm test
 
+      - name: Install Android alarms package
+        working-directory: packages/chaoxing-android-alarms
+        run: npm ci
+
+      - name: Typecheck Android alarms package
+        working-directory: packages/chaoxing-android-alarms
+        run: npm run typecheck
+
+      - name: Test Android alarms package
+        working-directory: packages/chaoxing-android-alarms
+        run: npm test
+
       - name: Install React Native app
         working-directory: apps/chaoxing_rn
         run: npm ci
@@ -58,6 +73,6 @@ jobs:
         working-directory: apps/chaoxing_rn
         run: npm run typecheck
 
-      - name: Test React Native preview wiring
+      - name: Test React Native production wiring
         working-directory: apps/chaoxing_rn
         run: npm test

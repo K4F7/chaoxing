@@ -38,6 +38,26 @@ describe("native ADR-0001 contract", () => {
     assert.match(module, /AsyncFunction\("cancel"\)/);
     assert.match(module, /AsyncFunction\("list"\)/);
     assert.match(module, /AsyncFunction\("rescheduleAll"\)/);
+    assert.match(module, /AsyncFunction\("listDelivered"\)/);
+    assert.match(module, /Function\("requestPostNotifications"\)/);
+    assert.match(module, /Function\("getLaunchTarget"\)/);
+    assert.match(module, /notifyAuthenticationExpired/);
+  });
+
+  test("alarm fire persists 提醒历史 keys and notification tap carries 待办 id", () => {
+    const receiver = read(
+      "android/src/main/java/com/chaoxinghelper/alarms/ChaoxingAlarmReceiver.kt",
+    );
+    const notifier = read(
+      "android/src/main/java/com/chaoxinghelper/alarms/ChaoxingAlarmNotifier.kt",
+    );
+    const store = read(
+      "android/src/main/java/com/chaoxinghelper/alarms/ChaoxingAlarmStore.kt",
+    );
+    assert.match(receiver, /recordDelivered/);
+    assert.match(store, /KEY_DELIVERED/);
+    assert.match(notifier, /EXTRA_ITEM_ID/);
+    assert.match(notifier, /putExtra\(EXTRA_ITEM_ID/);
   });
 
   test("config plugin keeps USE_EXACT_ALARM and blocks SCHEDULE_EXACT_ALARM", () => {

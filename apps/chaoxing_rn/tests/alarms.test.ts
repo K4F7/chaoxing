@@ -89,4 +89,23 @@ describe("fixture 待办事项 alarm wiring", () => {
       listed.every((plan) => plan.alarmManagerApi === "setExactAndAllowWhileIdle"),
     );
   });
+
+  test("registers live 待办事项 rather than only fixtures", async () => {
+    const now = new Date(2026, 6, 27, 9);
+    const backend = new MemoryAlarmBackend();
+    const scheduler = createFixtureAlarmScheduler(backend);
+    const { sampleTodos } = await import("../src/preview");
+    const { emptyReminderHistory } = await import("@chaoxinghelper/domain");
+    const { registerLiveAlarms } = await import("../src/alarms");
+
+    const result = await registerLiveAlarms(
+      scheduler,
+      sampleTodos(now),
+      emptyReminderHistory(),
+      now,
+      false,
+    );
+    assert.ok(result.scheduled.length > 0);
+    assert.ok(result.scheduled.every((plan) => plan.itemId !== ""));
+  });
 });

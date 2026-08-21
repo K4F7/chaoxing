@@ -57,5 +57,5 @@ Windows 与 Android 各自独立完成抓取、存储和提醒，互不通信、
 
 两端的提醒能力并不对称：Android 能区分提醒的打扰强度，而 Windows 只有一种系统通知强度，因此在 Windows 上不同强度的提醒表现相同。这一不对称是刻意保留的，工具不会为了对齐而削弱 Android 一侧。
 
-当前生产实现是 Flutter；目标运行时是 React Native。领域约束不随实现栈改变，迁移方式见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md)。
+Windows 生产实现仍是 Flutter（托盘 / 开机自启 / 安装器尚未迁到 React Native）。Android 的预期生产候选是 React Native（`apps/chaoxing_rn`）：应用内登录、本机直连同步、待办列表与预排 AlarmManager。Flutter Android 在 RN 真机验收（含 Doze）完成前继续作为回退。领域约束不随实现栈改变，迁移方式见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md)。
 _Avoid_：端、客户端、设备

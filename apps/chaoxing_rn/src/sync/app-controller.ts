@@ -307,6 +307,8 @@ export class ProductionAppController {
     this.autoSyncTimer = setInterval(() => {
       void this.refresh("auto");
     }, periodMs);
+    const handle = this.autoSyncTimer as { unref?: () => void };
+    handle.unref?.();
   }
 
   private stopAutoSync(): void {

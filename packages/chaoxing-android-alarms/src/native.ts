@@ -53,7 +53,11 @@ export function nativeBackendFromModule(
 }
 
 export class NativeAlarmRuntime implements AlarmRuntime {
-  constructor(private readonly native: NativeAlarmModule) {}
+  private readonly native: NativeAlarmModule;
+
+  constructor(native: NativeAlarmModule) {
+    this.native = native;
+  }
 
   async requestPostNotifications(): Promise<boolean> {
     return this.native.requestPostNotifications?.() ?? false;

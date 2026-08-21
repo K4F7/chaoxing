@@ -75,14 +75,3 @@ export async function registerLiveAlarms(
 export function summarizeAlarmPlan(plan: AndroidAlarmPlan): string {
   return `${plan.ruleId} · ${plan.tier} · ${plan.alarmManagerApi}`;
 }
-
-export async function registerLiveAlarms(
-  scheduler: ReminderAlarmScheduler,
-  items: Parameters<typeof planReminders>[0]["items"],
-  history: Parameters<typeof planReminders>[0]["history"],
-  now: Date,
-  showDetails = false,
-): Promise<RescheduleResult> {
-  const planned = planReminders({ items, history, now });
-  return scheduler.rescheduleAll(planned, { now, showDetails });
-}

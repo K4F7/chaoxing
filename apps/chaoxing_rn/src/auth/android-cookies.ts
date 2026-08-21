@@ -40,10 +40,12 @@ export function flattenNativeCookieBag(
       }
       continue;
     }
-    for (const nested of Object.values(value)) {
-      const cookie = toAndroidCookie(nested);
-      if (cookie) {
-        cookies.push(cookie);
+    if (value && typeof value === "object") {
+      for (const nested of Object.values(value as NativeCookieBag)) {
+        const cookie = toAndroidCookie(nested);
+        if (cookie) {
+          cookies.push(cookie);
+        }
       }
     }
   }

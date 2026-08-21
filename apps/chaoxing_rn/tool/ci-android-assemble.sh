@@ -23,6 +23,11 @@ if [[ ! -d android ]]; then
   exit 1
 fi
 
+# Gradle 9 dropped jcenter(); @react-native-cookies/cookies still declares it.
+while IFS= read -r -d '' file; do
+  sed -i 's/jcenter()/mavenCentral()/g' "$file"
+done < <(find node_modules -name 'build.gradle' -print0)
+
 if [[ -n "${ANDROID_HOME:-}" && -d "${ANDROID_HOME}" ]]; then
   printf 'sdk.dir=%s\n' "${ANDROID_HOME}" > android/local.properties
 fi

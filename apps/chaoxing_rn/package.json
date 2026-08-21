@@ -1,0 +1,32 @@
+{
+  "name": "chaoxing_rn",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@chaoxinghelper/android-alarms": "file:../../packages/chaoxing-android-alarms",
+    "@chaoxinghelper/domain": "file:../../packages/chaoxing-domain",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-cookies/cookies": "^6.2.1",
+    "expo": "~57.0.15",
+    "expo-secure-store": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "@types/react": "~19.2.2",
+    "tsx": "4.20.5",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "tsx --test tests/preview.test.ts tests/cookie-store.test.ts tests/cookie-vault.test.ts tests/session-controller.test.ts tests/auth-expiry-ui.test.ts tests/login-navigation.test.ts tests/android-cookies.test.ts tests/homepage-probe.test.ts tests/alarms.test.ts tests/fetch-client.test.ts tests/app-store.test.ts tests/app-controller.test.ts tests/todo-groups.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true
+}

@@ -6,7 +6,10 @@
 
 ## 项目结构
 
-- `apps/chaoxing_app/`：Flutter App，支持 Windows 和 Android。这是当前唯一的产品形态。
+- `apps/chaoxing_app/`：Flutter App。Windows 生产形态；Android 在 RN 真机验收完成前的回退。
+- `packages/chaoxing-domain/`：可移植的 TypeScript 领域切片（提醒规则、URL 信任、同步 / 解析 / 认证）。
+- `packages/chaoxing-android-alarms/`：ADR-0001 两档 AlarmManager。见 [docs/rn-android-alarms.md](docs/rn-android-alarms.md)。
+- `apps/chaoxing_rn/`：Android React Native 生产候选。见 [ADR-0002](docs/adr/0002-react-native-incremental-migration.md) 与 [docs/rn-android-production.md](docs/rn-android-production.md)。
 - `docs/`：产品文档与架构决策记录。
 - `src/`、`scripts/`、`tests/`：早期 Cloudflare Worker 实现的遗留代码，已不参与 App 运行路径，仅作为解析行为的对照保留。
 
@@ -29,4 +32,20 @@ flutter build windows
 bun install
 bun run typecheck
 bun test
+```
+
+React Native 增量与领域切片：
+
+```sh
+cd packages/chaoxing-domain
+npm test
+npm run typecheck
+
+cd ../chaoxing-android-alarms
+npm test
+npm run typecheck
+
+cd ../../apps/chaoxing_rn
+npm test
+npm run typecheck
 ```

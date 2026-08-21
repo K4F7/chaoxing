@@ -1,0 +1,13 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.chaoxinghelper'
+version = '0.1.0'
+
+android {
+  namespace "com.chaoxinghelper.alarms"
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.15.0"
+}

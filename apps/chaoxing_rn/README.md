@@ -19,4 +19,6 @@ npm test
 npm run typecheck
 ```
 
-应用内 WebView 登录需要 Android 开发构建（`npx expo run:android`）。本仓库 CI 不构建 APK（环境无 ANDROID_HOME 时亦然）。
+应用内 WebView 登录需要 Android 开发构建（`npx expo run:android`）。
+
+GitHub Actions 在 `ubuntu-latest` 上 `expo prebuild` 后打 APK：没有 `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEY_PROPERTIES_BASE64` 时是 debug-signed dry-run；两个 Secret 都齐才打 release。详见 [docs/rn-production.md](../../docs/rn-production.md)。

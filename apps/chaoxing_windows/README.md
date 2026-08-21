@@ -20,4 +20,4 @@ npm test
 npm run typecheck
 ```
 
-C# 外壳与 Inno Setup 需要 Windows SDK / ISCC，本环境不构建。
+C# 外壳与 Inno Setup 需要 Windows SDK / ISCC。GitHub Actions 的 `windows-latest` job 会 `dotnet publish`；找到 `ISCC.exe`（或能用 Chocolatey 装上）时再打 `chaoxing-windows-x64-setup.exe`，否则只保留外壳并在 `WINDOWS-BUILD.txt` 标明缺 Inno。详见 [docs/rn-production.md](../../docs/rn-production.md)。

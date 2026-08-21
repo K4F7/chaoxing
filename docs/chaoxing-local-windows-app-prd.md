@@ -102,10 +102,9 @@
 
 ### 技术栈
 
-- 当前生产实现：Flutter/Dart，目标平台 Windows 桌面与 Android。
-- 目标运行时：React Native（Android 先行）。迁移方式见 [ADR-0002](./adr/0002-react-native-incremental-migration.md)。
-- 可移植领域切片（提醒规则、URL 信任分级）用 TypeScript 写在 `packages/chaoxing-domain`。
-- Dart 侧 HTTP 与 HTML 解析仍用于当前 Flutter 生产路径的学习通页面抓取。
+- 当前生产实现：Android 为 React Native（`apps/chaoxing_rn`），Windows 为 TypeScript 本机宿主 + C# 外壳（`apps/chaoxing_windows`）。见 [ADR-0002](./adr/0002-react-native-incremental-migration.md)、[ADR-0003](./adr/0003-windows-native-host.md) 与 [rn-production.md](./rn-production.md)。
+- Flutter/Dart 参考实现在 `legacy/chaoxing_app`，不再出货，CI 只分析/测试。
+- 可移植领域切片（提醒规则、URL 信任分级、同步与解析）用 TypeScript 写在 `packages/chaoxing-domain`。
 
 ---
 
@@ -128,11 +127,19 @@
 ### 自动
 
 ```sh
-cd apps/chaoxing_app
+cd packages/chaoxing-domain && npm test && npm run typecheck
+cd ../chaoxing-android-alarms && npm test && npm run typecheck
+cd ../chaoxing-android-http && npm test && npm run typecheck
+cd ../../apps/chaoxing_rn && npm test && npm run typecheck
+cd ../chaoxing_windows && npm test && npm run typecheck
+```
+
+生产 APK / Windows 外壳由 `.github/workflows/chaoxing-rn.yml` 在 GitHub-hosted runner 上构建。Flutter 参考实现不再作为发布验收：
+
+```sh
+cd legacy/chaoxing_app
 flutter analyze
 flutter test
-flutter build windows --release
-./tool/verify_windows_single_instance.ps1
 ```
 
 单实例脚本在 Release 产物上验证隐藏窗口恢复、第二实例退出，以及目标路径下只保留一个主进程。

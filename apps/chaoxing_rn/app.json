@@ -21,7 +21,8 @@
       "usesCleartextTraffic": false
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "@chaoxinghelper/android-alarms/app.plugin.cjs"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

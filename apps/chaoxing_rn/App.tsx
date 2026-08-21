@@ -2,6 +2,12 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 
+import {
+  ReminderAlarmScheduler,
+  UnsupportedAlarmBackend,
+} from "@chaoxinghelper/android-alarms";
+
+import { createProductionAlarmBackend } from "./src/alarm-module";
 import { createAndroidCookieCollector } from "./src/auth/android-cookie-collector";
 import { createExpoCookieVault } from "./src/auth/expo-cookie-vault";
 import {
@@ -27,6 +33,13 @@ export default function App() {
     });
   }, []);
   const collector = useMemo(() => createAndroidCookieCollector(), []);
+  useMemo(
+    () =>
+      new ReminderAlarmScheduler(
+        createProductionAlarmBackend() ?? new UnsupportedAlarmBackend(),
+      ),
+    [],
+  );
   const [, setTick] = useState(0);
   const [screen, setScreen] = useState<ScreenName>("home");
 

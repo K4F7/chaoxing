@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@chaoxinghelper/android-alarms": "file:../../packages/chaoxing-android-alarms",
     "@chaoxinghelper/domain": "file:../../packages/chaoxing-domain",
     "@react-native-cookies/cookies": "^6.2.1",
     "expo": "~57.0.15",
@@ -23,7 +24,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "tsx --test tests/preview.test.ts tests/cookie-store.test.ts tests/cookie-vault.test.ts tests/session-controller.test.ts tests/auth-expiry-ui.test.ts tests/login-navigation.test.ts tests/android-cookies.test.ts tests/homepage-probe.test.ts",
+    "test": "tsx --test tests/preview.test.ts tests/cookie-store.test.ts tests/cookie-vault.test.ts tests/session-controller.test.ts tests/auth-expiry-ui.test.ts tests/login-navigation.test.ts tests/android-cookies.test.ts tests/homepage-probe.test.ts tests/alarms.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "private": true

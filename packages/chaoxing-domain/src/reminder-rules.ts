@@ -114,7 +114,14 @@ export function collectDueReminders(input: {
   history: ReminderHistory;
   now: Date;
 }): PlannedReminder[] {
-  return planReminders(input).filter(
-    (plan) => plan.triggerAt.getTime() <= input.now.getTime(),
-  );
+  return planReminders(input).filter((plan) => {
+    if (input.now.getTime() < plan.triggerAt.getTime()) {
+      return false;
+    }
+    if (plan.ruleId === "due-24h") {
+      const dueAt = plan.item.dueAt;
+      return dueAt !== null && input.now.getTime() < addHours(dueAt, -2).getTime();
+    }
+    return true;
+  });
 }

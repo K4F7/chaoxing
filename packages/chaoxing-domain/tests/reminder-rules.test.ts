@@ -84,20 +84,20 @@ describe("planReminders", () => {
   test("replans a rule after the due time snapshot changes", () => {
     const now = new Date(2026, 6, 27, 9);
     const original = assignmentItem({ dueAt: addHours(now, 20) });
-    const first = collectDueReminders({
+    const first = planReminders({
       items: [original],
       history: emptyReminderHistory(),
       now,
     });
-    const postponed = collectDueReminders({
+    const postponed = planReminders({
       items: [assignmentItem({ dueAt: addHours(now, 26) })],
       history: markReminderSent(emptyReminderHistory(), first[0].key, now),
       now,
     });
 
-    assert.equal(first.length, 1);
-    assert.equal(postponed.length, 1);
-    assert.notEqual(postponed[0].key, first[0].key);
+    assert.equal(first.length, 2);
+    assert.ok(postponed.every((plan) => plan.key !== first[0].key));
+    assert.ok(postponed.some((plan) => plan.ruleId === "due-24h"));
   });
 
   test("skips items without a future due time", () => {

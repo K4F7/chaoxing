@@ -1,7 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "paths": {
+      "@chaoxinghelper/android-alarms": [
+        "../../packages/chaoxing-android-alarms/src/index.ts"
+      ],
+      "@chaoxinghelper/domain": ["../../packages/chaoxing-domain/src/index.ts"]
+    }
   },
   "include": ["App.tsx", "index.ts", "src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "tests"]

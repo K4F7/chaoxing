@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.sein.chaoxingrn",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -18,6 +19,9 @@
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      "@chaoxinghelper/android-alarms/app.plugin.cjs"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }

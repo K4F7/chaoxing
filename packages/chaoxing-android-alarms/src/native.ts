@@ -9,7 +9,11 @@ export type NativeAlarmModule = {
 };
 
 export class NativeAlarmBackend implements AlarmBackend {
-  constructor(private readonly native: NativeAlarmModule) {}
+  private readonly native: NativeAlarmModule;
+
+  constructor(native: NativeAlarmModule) {
+    this.native = native;
+  }
 
   schedule(plan: AndroidAlarmPlan): Promise<void> {
     return this.native.schedule(plan);

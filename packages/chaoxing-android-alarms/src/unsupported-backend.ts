@@ -2,7 +2,11 @@ import { UnsupportedAlarmBackendError } from "./errors";
 import { type AlarmBackend, type AndroidAlarmPlan } from "./types";
 
 export class UnsupportedAlarmBackend implements AlarmBackend {
-  constructor(private readonly detail?: string) {}
+  private readonly detail?: string;
+
+  constructor(detail?: string) {
+    this.detail = detail;
+  }
 
   async schedule(_plan: AndroidAlarmPlan): Promise<void> {
     throw new UnsupportedAlarmBackendError(this.detail);
@@ -21,6 +25,6 @@ export class UnsupportedAlarmBackend implements AlarmBackend {
   }
 
   async canScheduleExactAlarms(): Promise<boolean> {
-    return false;
+    throw new UnsupportedAlarmBackendError(this.detail);
   }
 }

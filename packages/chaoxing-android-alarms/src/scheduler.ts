@@ -9,7 +9,11 @@ import {
 } from "./types";
 
 export class ReminderAlarmScheduler {
-  constructor(private readonly backend: AlarmBackend) {}
+  private readonly backend: AlarmBackend;
+
+  constructor(backend: AlarmBackend) {
+    this.backend = backend;
+  }
 
   async schedule(
     plan: PlannedReminder,

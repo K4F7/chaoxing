@@ -26,12 +26,13 @@ export function isTrustedChaoxingCookieDomain(domain: string): boolean {
   return normalized === "chaoxing.com" || isTrustedChaoxingRequestHost(normalized);
 }
 
+export function isTrustedChaoxingUri(url: URL): boolean {
+  return url.protocol === "https:" && isTrustedChaoxingRequestHost(url.hostname);
+}
+
 export function isTrustedChaoxingUrl(url: string): boolean {
   try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === "https:" && isTrustedChaoxingRequestHost(parsed.hostname)
-    );
+    return isTrustedChaoxingUri(new URL(url));
   } catch {
     return false;
   }

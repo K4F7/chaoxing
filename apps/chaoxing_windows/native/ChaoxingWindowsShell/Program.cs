@@ -137,13 +137,14 @@ internal static class ToastNotifier
 {
     public static void Show(string title, string body)
     {
-        var script = $"New-BurntToastNotification -Text '{title.Replace("'", "''")}', '{body.Replace("'", "''")}'";
+        _ = title;
+        _ = body;
         try
         {
             Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell",
-                Arguments = $"-NoProfile -Command \"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > \$null\"",
+                Arguments = @"-NoProfile -Command ""[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null""",
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });

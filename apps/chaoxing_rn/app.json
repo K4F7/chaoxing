@@ -10,14 +10,19 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.sein.chaoxingrn",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": false
     },
+    "plugins": [
+      "expo-secure-store"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }

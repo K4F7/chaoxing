@@ -1,0 +1,39 @@
+{
+  "name": "@chaoxinghelper/android-http",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./app.plugin.js": "./app.plugin.cjs"
+  },
+  "files": [
+    "android",
+    "app.plugin.cjs",
+    "expo-module.config.json",
+    "plugin",
+    "src"
+  ],
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chaoxinghelper/domain": "file:../chaoxing-domain"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo": { "optional": true },
+    "expo-modules-core": { "optional": true }
+  }
+}

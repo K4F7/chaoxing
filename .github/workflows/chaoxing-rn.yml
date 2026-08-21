@@ -1,4 +1,4 @@
-name: Chaoxing RN
+name: Chaoxing production
 
 on:
   push:
@@ -6,25 +6,29 @@ on:
       - ".github/workflows/chaoxing-rn.yml"
       - "packages/chaoxing-domain/**"
       - "packages/chaoxing-android-alarms/**"
+      - "packages/chaoxing-android-http/**"
       - "apps/chaoxing_rn/**"
+      - "apps/chaoxing_windows/**"
   pull_request:
     paths:
       - ".github/workflows/chaoxing-rn.yml"
       - "packages/chaoxing-domain/**"
       - "packages/chaoxing-android-alarms/**"
+      - "packages/chaoxing-android-http/**"
       - "apps/chaoxing_rn/**"
+      - "apps/chaoxing_windows/**"
   workflow_dispatch:
 
 concurrency:
-  group: chaoxing-rn-${{ github.workflow }}-${{ github.ref }}
+  group: chaoxing-production-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  domain-alarms-and-app:
-    name: Domain + alarms + RN app
+  domain-alarms-http-and-app:
+    name: Domain + alarms + HTTP + RN Android
     runs-on: ubuntu-latest
 
     steps:
@@ -39,6 +43,7 @@ jobs:
           cache-dependency-path: |
             packages/chaoxing-domain/package-lock.json
             packages/chaoxing-android-alarms/package-lock.json
+            packages/chaoxing-android-http/package-lock.json
             apps/chaoxing_rn/package-lock.json
 
       - name: Install domain package
@@ -65,6 +70,18 @@ jobs:
         working-directory: packages/chaoxing-android-alarms
         run: npm test
 
+      - name: Install Android HTTP package
+        working-directory: packages/chaoxing-android-http
+        run: npm ci
+
+      - name: Typecheck Android HTTP package
+        working-directory: packages/chaoxing-android-http
+        run: npm run typecheck
+
+      - name: Test Android HTTP package
+        working-directory: packages/chaoxing-android-http
+        run: npm test
+
       - name: Install React Native app
         working-directory: apps/chaoxing_rn
         run: npm ci
@@ -73,6 +90,39 @@ jobs:
         working-directory: apps/chaoxing_rn
         run: npm run typecheck
 
-      - name: Test React Native production wiring
+      - name: Test React Native Android app
         working-directory: apps/chaoxing_rn
+        run: npm test
+
+  windows-host:
+    name: Windows host
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            packages/chaoxing-domain/package-lock.json
+            apps/chaoxing_windows/package-lock.json
+
+      - name: Install domain package
+        working-directory: packages/chaoxing-domain
+        run: npm ci
+
+      - name: Install Windows host
+        working-directory: apps/chaoxing_windows
+        run: npm ci
+
+      - name: Typecheck Windows host
+        working-directory: apps/chaoxing_windows
+        run: npm run typecheck
+
+      - name: Test Windows tray, autostart, due-now, installer
+        working-directory: apps/chaoxing_windows
         run: npm test

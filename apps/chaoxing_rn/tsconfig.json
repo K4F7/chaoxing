@@ -6,6 +6,9 @@
       "@chaoxinghelper/android-alarms": [
         "../../packages/chaoxing-android-alarms/src/index.ts"
       ],
+      "@chaoxinghelper/android-http": [
+        "../../packages/chaoxing-android-http/src/index.ts"
+      ],
       "@chaoxinghelper/domain": ["../../packages/chaoxing-domain/src/index.ts"]
     }
   },

@@ -21,17 +21,20 @@ import {
 } from "./src/auth/homepage-probe";
 import { buildHomeViewModel } from "./src/auth/home-view-model";
 import { SessionController } from "./src/auth/session-controller";
-import { createFetchChaoxingClient } from "./src/http/fetch-client";
+import { createSessionHttpClient } from "./src/http/fetch-client";
+import { loadNativeHttpModule } from "./src/http/native-module";
 import { AppDataStore } from "./src/persist/app-store";
 import { createDeviceJsonStore } from "./src/persist/device-store";
 import { MemoryJsonStore } from "./src/persist/json-store";
 import { DetailScreen } from "./src/screens/DetailScreen";
+import { DiagnosticsScreen } from "./src/screens/DiagnosticsScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { ManualCookieScreen } from "./src/screens/ManualCookieScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ProductionAppController } from "./src/sync/app-controller";
 
-type ScreenName = "home" | "login" | "manual";
+type ScreenName = "home" | "login" | "manual" | "settings" | "diagnostics";
 
 export default function App() {
   const runtime = useMemo(
@@ -46,12 +49,20 @@ export default function App() {
         void runtime.notifyAuthenticationExpired();
       },
     });
+    const nativeHttp = loadNativeHttpModule();
     return new ProductionAppController({
       session,
       store: new AppDataStore(createDeviceJsonStore() ?? new MemoryJsonStore()),
       createRunner: () =>
         createLocalSyncRunner({
-          http: createFetchChaoxingClient(fetch),
+          http: createSessionHttpClient({
+            session: {
+              getSource: () => session.getCookieSource(),
+              persist: (source) => session.replaceCookieSource(source),
+            },
+            fetchImpl: fetch,
+            native: nativeHttp,
+          }),
         }),
       scheduler: new ReminderAlarmScheduler(
         createProductionAlarmBackend() ?? new UnsupportedAlarmBackend(),
@@ -117,6 +128,37 @@ export default function App() {
     );
   }
 
+  if (screen === "settings") {
+    return (
+      <>
+        <SettingsScreen
+          settings={controller.currentSettings()}
+          catalog={controller.state.catalog}
+          onSave={(settings) => controller.saveSettings(settings)}
+          onToggleCourse={(courseKey, monitored) =>
+            controller.setCourseMonitored(courseKey, monitored)
+          }
+          onRefreshCourses={() => controller.refreshCourses()}
+          onClose={() => setScreen("home")}
+        />
+        <StatusBar style="auto" />
+      </>
+    );
+  }
+
+  if (screen === "diagnostics") {
+    return (
+      <>
+        <DiagnosticsScreen
+          report={controller.exportDiagnostics()}
+          failureCount={controller.state.failures.length}
+          onClose={() => setScreen("home")}
+        />
+        <StatusBar style="auto" />
+      </>
+    );
+  }
+
   if (selected) {
     return (
       <>
@@ -137,6 +179,8 @@ export default function App() {
           void controller.refresh("manual");
         }}
         onOpenItem={(itemId) => controller.openItem(itemId)}
+        onOpenSettings={() => setScreen("settings")}
+        onOpenDiagnostics={() => setScreen("diagnostics")}
       />
       <StatusBar style="auto" />
     </>

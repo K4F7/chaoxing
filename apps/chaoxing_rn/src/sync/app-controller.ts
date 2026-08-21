@@ -13,6 +13,8 @@ import {
   planReminders,
   pruneReminderHistory,
   redactSensitiveText,
+  setCourseMonitored,
+  buildDiagnosticsReport,
   type AppSyncFailure,
   type AppSyncResponse,
   type CourseCatalog,
@@ -66,6 +68,7 @@ export class ProductionAppController {
   private readonly listeners = new Set<() => void>();
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
   private refreshInFlight: Promise<void> | null = null;
+  private forceCourseDiscovery = false;
   private sync: AppSyncResponse | null = null;
   private history: ReminderHistory = emptyReminderHistory();
   private settings: SyncSettings = {
@@ -139,6 +142,42 @@ export class ProductionAppController {
     this.stopAutoSync();
   }
 
+  currentSettings(): SyncSettings {
+    return { ...this.settings };
+  }
+
+  exportDiagnostics(generatedAt?: Date): string {
+    return buildDiagnosticsReport({
+      cookieSource: this.session.getCookieSource(),
+      sync: this.sync,
+      lastError: this.current.error ?? this.session.state.error,
+      alarmError: this.current.alarmError,
+      generatedAt,
+    });
+  }
+
+  async saveSettings(next: SyncSettings): Promise<void> {
+    this.settings = next;
+    await this.store.saveSettings(next);
+    this.startAutoSync();
+    await this.rescheduleLive();
+  }
+
+  async setCourseMonitored(courseKey: string, monitored: boolean): Promise<void> {
+    const catalog = setCourseMonitored(this.current.catalog, courseKey, monitored);
+    await this.store.saveCourseCatalog(catalog);
+    this.patch({ catalog });
+  }
+
+  async refreshCourses(): Promise<void> {
+    this.forceCourseDiscovery = true;
+    try {
+      await this.refresh("manual");
+    } finally {
+      this.forceCourseDiscovery = false;
+    }
+  }
+
   async load(): Promise<void> {
     this.patch({ loading: true });
     await this.session.load();
@@ -207,6 +246,7 @@ export class ProductionAppController {
         config: configFromSettings(this.settings, cookie),
         previous: this.sync,
         courseCatalog: this.current.catalog,
+        forceCourseDiscovery: this.forceCourseDiscovery,
         onProgress: (progress) => {
           this.patch({ progress });
         },

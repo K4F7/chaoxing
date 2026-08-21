@@ -170,3 +170,11 @@ export {
   type LocalSyncRunner,
   type SyncRunInput,
 } from "./runner";
+export { buildDiagnosticsReport, type DiagnosticsReportInput } from "./diagnostics";
+export {
+  collectSetCookieHeader,
+  createCookieAwareHttpClient,
+  type CookieAwareHttpOptions,
+  type CookieSessionPort,
+  type NativeCookieJar,
+} from "./cookie-http";

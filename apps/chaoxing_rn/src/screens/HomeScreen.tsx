@@ -16,6 +16,8 @@ type Props = {
   onOpenManualCookie: () => void;
   onRefresh: () => void;
   onOpenItem: (itemId: string) => void;
+  onOpenSettings: () => void;
+  onOpenDiagnostics: () => void;
 };
 
 export function HomeScreen({
@@ -25,6 +27,8 @@ export function HomeScreen({
   onOpenManualCookie,
   onRefresh,
   onOpenItem,
+  onOpenSettings,
+  onOpenDiagnostics,
 }: Props) {
   const groups = groupTodoItems(todo.items);
   return (
@@ -94,6 +98,16 @@ export function HomeScreen({
           </Pressable>
           <Pressable onPress={onOpenManualCookie} style={styles.secondary}>
             <Text style={styles.secondaryLabel}>手动导入 Cookie</Text>
+          </Pressable>
+          <Pressable onPress={onOpenSettings} style={styles.secondary}>
+            <Text style={styles.secondaryLabel}>设置与受监控课程</Text>
+          </Pressable>
+          <Pressable onPress={onOpenDiagnostics} style={styles.secondary}>
+            <Text style={styles.secondaryLabel}>
+              {todo.failures.length > 0
+                ? `诊断导出（${todo.failures.length} 处失败）`
+                : "诊断导出"}
+            </Text>
           </Pressable>
         </View>
       )}

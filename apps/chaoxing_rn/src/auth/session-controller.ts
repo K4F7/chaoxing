@@ -166,6 +166,23 @@ export class SessionController implements ChaoxingSyncSession {
     await this.importCookieSource(parseManualCookieInput(input));
   }
 
+  /**
+   * Persist a rotated cookie jar after sync. Does not re-authenticate;
+   * identity cookies must still be present. Never used for manual paste.
+   */
+  async replaceCookieSource(source: string): Promise<void> {
+    const trimmed = source.trim();
+    if (trimmed === this.current.cookieSource) {
+      return;
+    }
+    if (!isSafeChaoxingCookieSource(trimmed) || !hasChaoxingIdentityCookieSource(trimmed)) {
+      return;
+    }
+    await this.vault.saveCookieSource(trimmed);
+    this.patch({ cookieSource: trimmed });
+  }
+
+
   markExpired(): void {
     if (this.current.authenticationState === "expired") {
       return;

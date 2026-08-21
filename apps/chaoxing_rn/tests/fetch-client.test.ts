@@ -64,3 +64,26 @@ describe("fetch Chaoxing HTTP client", () => {
     assert.equal(response.body, "<html></html>");
   });
 });
+
+test("records getSetCookie when fetch exposes it", async () => {
+  const fetchImpl: FetchLike = async () => ({
+    status: 200,
+    headers: {
+      get() {
+        return null;
+      },
+      getSetCookie() {
+        return ["UID=2; Path=/", "vc3=x; Path=/"];
+      },
+    },
+    async text() {
+      return "ok";
+    },
+  });
+  const response = await createFetchChaoxingClient(fetchImpl).send({
+    method: "GET",
+    url: "https://i.chaoxing.com/",
+    headers: {},
+  });
+  assert.equal(response.headers["set-cookie"], "UID=2; Path=/, vc3=x; Path=/");
+});

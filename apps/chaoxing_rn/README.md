@@ -1,29 +1,16 @@
-# 学习通待办（React Native / Android）
+# 学习通待办（React Native / Android 生产）
 
-Expo 57 应用。**Android 的预期生产候选**；Windows 生产形态仍是 Flutter。Flutter Android 在真机验收（含 Doze）完成前继续作为回退。
+Expo 57 应用，**Android 生产路径**。Windows 生产应用是 [`apps/chaoxing_windows`](../chaoxing_windows)。
 
-本机直连学习通：登录 → 真同步 → 待办列表 → 按 ADR-0001 预排 AlarmManager。Cookie 只进 Keystore。
+提醒规则、同步、URL 信任分级来自 [`packages/chaoxing-domain`](../../packages/chaoxing-domain)。预排闹钟见 [`packages/chaoxing-android-alarms`](../../packages/chaoxing-android-alarms)。会话续期走 [`packages/chaoxing-android-http`](../../packages/chaoxing-android-http)（OkHttp + CookieManager），避免 JS `fetch` 丢掉 `Set-Cookie`。
 
-## 日常路径
+## 功能
 
-1. 未配置时首页提供「登录学习通」和「手动导入 Cookie」。
-2. 登录页用 WebView 打开学习通，顶层导航只允许[可信主机](../../CONTEXT.md)。
-3. 登录成功后请求通知权限，立刻跑 `createLocalSyncRunner`。
-4. 首页展示合并后的待办；详情只打开可信学习通链接。
-5. 同步成功后按 `planReminders` 全量重排闹钟。闹钟响铃会记下提醒历史。
-6. [认证失效](../../CONTEXT.md) 出横幅、系统通知一次、停止自动同步，冷启动仍可见。
-
-## 安全
-
-- Cookie 只写入 `expo-secure-store`。课程目录 / 已见通知 / 提醒历史走 AsyncStorage，**不含 Cookie**。
-- 带 Cookie 的请求由领域 runner 限制在显式学习通 HTTPS 主机内。
-- 手动导入整份拒绝含换行的输入。
-
-## 本应用不做
-
-- Windows RN 托盘 / WebView2 / 安装器 / 开机自启
-- 删除 Flutter
-- 后台定期抓取（提醒只走预排闹钟）
+- 应用内 WebView 登录与手动导入 Cookie（含换行整份拒绝，界面不回填）
+- 打开即看缓存，前台同步，失败保留列表
+- 设置：提醒开关、通知详情、课程空间同步、受监控课程勾选、手动刷新课程列表
+- 诊断导出脱敏 Cookie / token / 账号参数
+- 同步后全量重排 AlarmManager；认证失效横幅并停止自动同步
 
 ## 验证
 
@@ -32,4 +19,4 @@ npm test
 npm run typecheck
 ```
 
-应用内 WebView 登录和 AlarmManager 需要 Android 开发构建（`npx expo run:android`）。本仓库 CI 不跑 Gradle：环境没有 `ANDROID_HOME`，不能把未证明的设备行为写成已通过。
+应用内 WebView 登录需要 Android 开发构建（`npx expo run:android`）。本仓库 CI 不构建 APK（环境无 ANDROID_HOME 时亦然）。
